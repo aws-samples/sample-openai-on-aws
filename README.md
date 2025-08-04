@@ -1,11 +1,24 @@
-## My Project
+## Sample-OpenAI-on-AWS
 
-TODO: Fill this README out!
+Welcome to the Sample OpenAI-on-AWS repository! This collection provides practical examples and tutorials for running oss OpenAI models on AWS infrastructure.
 
-Be sure to:
+### 🚀 Getting Started
 
-* Change the title in this README
-* Edit your repository description on GitHub
+Start with our foundational notebook:
+
+- Getting Started on Bedrock OpenAI OSS
+
+This notebook walks you through the basics of deploying and using OpenAI models on Amazon Bedrock, including setup, configuration, and your first API calls.
+
+### 🤝 Contributing
+
+We're actively looking for contributors! Whether you're interested in:
+
+- Adding new examples and tutorials
+- Improving existing notebooks
+- Documentation enhancements
+- Bug fixes and optimizations
+- Sharing your own use cases
 
 ## Security
 
