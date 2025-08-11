@@ -1,4 +1,4 @@
-# SGLang on AWS CDK
+# OpenAI models on SGLang with AWS CDK
 
 Deploy [SGLang](https://github.com/sgl-project/sglang), a high-performance LLM serving framework, on AWS infrastructure using AWS CDK.
 
@@ -124,19 +124,6 @@ cdk destroy
 1. **Workers not starting:** Check CloudWatch logs at `/aws/ec2/sglang`
 2. **Router not accessible:** Verify security groups allow port 8000
 3. **Model download fails:** Ensure instance has internet access and sufficient disk space
-
-## Related Projects
-
-For other inference deployment options in this repository, see:
-- [NIMS-INFERENCE](../nims-inference/README.md) - NVIDIA NIMs on EKS/EC2/SageMaker
-- [TRTLLM-INFERENCE](../trtllm-inference/README.md) - TensorRT-LLM optimization on EKS
-- [Ray Service](../ray-service/README.md) - Ray-based model serving on EKS
-
-## Infrastructure Setup
-
-Before deploying SGLang, ensure you have the necessary AWS infrastructure:
-- See [Infrastructure Setup](../../1.infrastructure/README.md) for VPC and networking setup
-- SGLang can use existing VPCs or create new ones automatically
 
 ## Contributing
 
