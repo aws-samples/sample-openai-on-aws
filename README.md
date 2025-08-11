@@ -2,7 +2,7 @@
 
 Welcome to the Sample OpenAI-on-AWS repository! This collection provides practical examples and tutorials for running oss OpenAI models on AWS infrastructure.
 
-![base-imgs/OpenAI-AWS.png]
+![repo-image](base-imgs/OpenAI-AWS.png)
 
 ### 🚀 Getting Started
 
