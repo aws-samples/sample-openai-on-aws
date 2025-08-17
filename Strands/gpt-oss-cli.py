@@ -26,15 +26,16 @@ async def process_agent_stream(agent: Agent, query: str, show_reasoning: bool = 
             for item in event["message"].get("content", []):
                 if "reasoningContent" in item and show_reasoning:
                     text = item["reasoningContent"]["reasoningText"]["text"]
-                    print(f"\n🤔 Reasoning:\n{text}")
+                    print(f"\n🤔 Reasoning:\n{text}\n")
                 elif "text" in item and item["text"].strip():
-                    print(f"\n💬 Response:\n{item['text']}")
+                    print(f"\n💬 Response:\n{item['text']}\n")
                 elif "toolUse" in item:
-                    print(f"\n🔧 Tool:\n{item['toolUse']['name']}")
+                    print(f"\n🔧 Tool: {item['toolUse']['name']}")
+                    print(f"\n🔧 Paramaters:\n{item['toolUse']['input']}\n")
                 elif "toolResult" in item:
                     content = item["toolResult"].get("content", [{}])[0].get("text", "")
                     status = item["toolResult"].get("status", "unknown")
-                    print(f"\n⚙️ Result ({status}):\n{content}")
+                    print(f"\n⚙️ Result ({status}):\n\n{content}\n")
 
 async def interactive_mode(agent: Agent, show_reasoning: bool = False) -> None:
     """Handle interactive mode."""
@@ -55,11 +56,11 @@ async def interactive_mode(agent: Agent, show_reasoning: bool = False) -> None:
 
 def main() -> None:
     """Main entry point."""
-    model_id = os.getenv("STRANDS_MODEL_ID", "openai.gpt-oss-120b-1:0")
-    max_tokens = int(os.getenv("STRANDS_MAX_TOKENS", "1000"))
+    model_id = os.getenv("STRANDS_MODEL_ID", "openai.gpt-oss-20b-1:0")
+    max_tokens = int(os.getenv("STRANDS_MAX_TOKENS", "4000"))
     temperature = float(os.getenv("STRANDS_TEMPERATURE", "0.2"))
-    streaming = os.getenv("STRANDS_STREAMING", "false").lower() in ("true", "1", "yes")
-    show_reasoning = os.getenv("STRANDS_SHOW_REASONING", "false").lower() in ("true", "1", "yes")
+    streaming = os.getenv("STRANDS_STREAMING", "true").lower() in ("true", "1", "yes")
+    show_reasoning = os.getenv("STRANDS_SHOW_REASONING", "true").lower() in ("true", "1", "yes")
     reasoning_effort = os.getenv("STRANDS_REASONING_EFFORT", "low")
     
     print("=" * 60)
@@ -79,7 +80,8 @@ def main() -> None:
         ),
         system_prompt=os.getenv("STRANDS_SYSTEM_PROMPT", 
             "You are a helpful assistant. Reply in rhyme, including Haiku, Syllabic and Alliteration"),
-        tools=[current_time, file_read, file_write, http_request, calculator]
+        tools=[current_time, file_read, file_write, http_request, calculator],
+        callback_handler=None
     )
     
     if len(sys.argv) > 1:
