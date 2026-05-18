@@ -2,12 +2,12 @@ model_list:
   # OpenAI OSS models via Bedrock (primary — for Codex)
   - model_name: gpt-4o
     litellm_params:
-      model: bedrock/openai.gpt-5.4
+      model: bedrock/openai.gpt-oss-safeguard-120b
       aws_region_name: os.environ/AWS_REGION
 
   - model_name: gpt-4o-mini
     litellm_params:
-      model: bedrock/openai.gpt-oss-20b-1:0
+      model: bedrock/openai.gpt-oss-safeguard-20b
       aws_region_name: os.environ/AWS_REGION
 
   - model_name: gpt-oss-120b
@@ -15,15 +15,19 @@ model_list:
       model: bedrock/openai.gpt-oss-120b-1:0
       aws_region_name: os.environ/AWS_REGION
 
-  # Claude models — available as fallback or for non-Codex clients
-  - model_name: claude-sonnet
+  - model_name: gpt-oss-20b
     litellm_params:
-      model: bedrock/us.anthropic.claude-sonnet-4-6
+      model: bedrock/openai.gpt-oss-20b-1:0
       aws_region_name: os.environ/AWS_REGION
 
-  - model_name: claude-haiku
+  - model_name: gpt-oss-safeguard-120b
     litellm_params:
-      model: bedrock/us.anthropic.claude-haiku-4-5-20251001-v1:0
+      model: bedrock/openai.gpt-oss-safeguard-120b
+      aws_region_name: os.environ/AWS_REGION
+
+  - model_name: gpt-oss-safeguard-20b
+    litellm_params:
+      model: bedrock/openai.gpt-oss-safeguard-20b
       aws_region_name: os.environ/AWS_REGION
 
 general_settings:
@@ -44,4 +48,4 @@ general_settings:
 litellm_settings:
   set_verbose: false
   drop_params: true               # silently drop unsupported OpenAI params
-  callbacks: ["otel"]             # forwards success + failure events to OTel collector
+  # callbacks: ["otel"]           # uncomment + set OTEL_ENDPOINT env var if you wire up an OTel collector

@@ -177,22 +177,23 @@ build it when the need is concrete.
 
 ---
 
-## Gateway path caveat
+## LLM Gateway path caveat
 
-If you run the LiteLLM Gateway (Path 2), the identity chain splits:
+If you route through an LLM Gateway, the identity chain splits:
 
 - **CloudTrail** sees only the gateway's task role on every `InvokeModel`.
   `line_item_iam_principal` can no longer attribute cost to end users.
-- **Cost attribution** moves into the gateway's spend logs (LiteLLM's
-  Postgres tables, keyed by the JWT subject). Export to Prometheus or
-  Athena-over-S3 for durable reporting.
-- **Usage (OTel)** works the same as IdC — Codex still emits, and the collector
-  still tags `user.id` from the header. However, you are now maintaining two
-  attribution planes (gateway spend database and OTel) that must be joined by
-  username in whatever BI layer you use.
+- **Cost attribution** moves into the gateway's own spend logs / metrics
+  (e.g. LiteLLM's Postgres tables keyed by the JWT subject; Portkey's
+  analytics; Kong's metrics plugin). Export to your BI layer for durable
+  reporting.
+- **Usage telemetry** is the gateway's responsibility on this path —
+  configure the gateway's native OTel/Prometheus/spend callbacks, not the
+  Codex-side OTel collector described in Layer 1.
 
-This is the principal operational cost of choosing the Gateway path. See
-`deploy-gateway.md` for setup and the LiteLLM spend-table schema.
+This is the principal operational cost of choosing the gateway path. See
+[QUICKSTART_LLM_GATEWAY.md](QUICKSTART_LLM_GATEWAY.md) for the LiteLLM
+reference setup and its telemetry configuration.
 
 ---
 

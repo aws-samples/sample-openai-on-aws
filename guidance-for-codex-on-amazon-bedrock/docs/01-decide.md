@@ -1,24 +1,32 @@
 # Decide
 
-Two deployment paths, in recommended order. Choose the first one your organization can
-run.
+Two deployment patterns, in recommended order. Choose the first one your organization can run.
 
-> **Decision rule:** If you can run IAM Identity Center, use IAM Identity Center.
-> If you cannot and you need centralized enforcement or hard per-user budgets,
-> run the Gateway.
+> **Decision rule:** If you can run IAM Identity Center, use Native AWS Access.
+> If you need hard per-user budgets or rate limiting, use LLM Gateway.
 
-| | **IAM Identity Center** (recommended) | **Gateway** (alternative) |
-|---|---|---|
-| Developer setup | `aws sso login` via AWS CLI v2 | Set `OPENAI_BASE_URL` + present OIDC JWT |
-| Binary distribution | Signed AWS CLI v2 (winget/MSI/brew/MDM) | None |
-| Infra to run | None (free AWS control plane) | ECS Fargate + ALB + Postgres (~$90–150/mo + 0.1–0.25 FTE) |
-| Bedrock auth | Per-user federated IAM credentials | Gateway IAM task role |
-| Per-user attribution | CloudTrail `userIdentity` (SSO username) | JWT claims via OTel |
-| Hard per-user budgets | No (attribution only) | Yes (LiteLLM budget/rate limits) |
-| Codex provider | Native `amazon-bedrock` | Generic `openai` (loses native path) |
-| FedRAMP/GovCloud | IdC in GovCloud partition | ECS on GovCloud |
+## Pattern Comparison
 
-## Prerequisite checklist — IAM Identity Center
+| Capability | Native AWS Access | LLM Gateway |
+|------------|-------------------|------------------|
+| **Authentication** | SAML → IdC | OIDC → Gateway |
+| **IAM Identity Center Required?** | ✅ Yes | ❌ No |
+| **Path to Bedrock** | Codex → Bedrock (native AWS SDK) | Codex → Gateway → Bedrock |
+| **Developer Command** | `aws sso login` | `export OPENAI_API_KEY=...` |
+| **Per-user CloudTrail Audit** | ✅ Native | ✅ Gateway logs |
+| **Soft Alerts (CloudWatch)** | Optional | Optional |
+| **Hard Budget Limits** | ❌ No | Optional |
+| **Per-team Quotas** | ❌ No | Optional |
+| **Rate Limiting (RPM/TPM)** | ❌ No | Optional |
+| **Model Routing/Fallback** | ❌ No | ✅ Yes |
+| **Setup Time** | 5-60 min | 15 min |
+| **Infra Cost** | Free (AWS control plane) | ~$100-150/mo |
+
+---
+
+---
+
+## Prerequisite checklist — Native AWS Access (IAM Identity Center)
 
 Run this path if **all** of the following are true:
 
@@ -32,9 +40,9 @@ Run this path if **all** of the following are true:
 - [ ] Per-user *attribution* in CloudTrail/CUR is sufficient — you do **not**
       require hard per-user token or cost cutoffs.
 
-If all five apply, proceed to [Deploy — IAM Identity Center](deploy-identity-center.md).
+If all five apply, proceed to [Deploy — IAM Identity Center](deploy-identity-center.md) or [QUICKSTART_NATIVE_AWS_ACCESS.md](QUICKSTART_NATIVE_AWS_ACCESS.md).
 
-## Prerequisite checklist — Gateway
+## Prerequisite checklist — LLM Gateway
 
 Run this path if IdC is not available **or** you need centralized
 enforcement. All of the following must apply:
@@ -59,9 +67,13 @@ other OpenAI-compatible gateways — **Portkey**, **Bifrost**, **Kong AI Gateway
 **Helicone**, the **AWS Bedrock Gateway** sample, or a custom FastAPI shim.
 Choose whichever matches your organization's operational posture.
 
-*(Canonical deploy doc: `deploy-gateway.md`.)*
+*(Canonical deploy doc: [QUICKSTART_LLM_GATEWAY.md](QUICKSTART_LLM_GATEWAY.md).)*
+
+---
 
 ## Why this order
+
+**Native AWS Access (IdC) is recommended first because:**
 
 1. **Enterprise audiences need centralized cost and usage attribution with
    scalable distribution.** That eliminates the static Bedrock API key as a
@@ -71,11 +83,18 @@ Choose whichever matches your organization's operational posture.
    CloudTrail → CUR attribution; the same identity stamped into OTel as
    `user.id` → CloudWatch dashboards; signed AWS CLI v2 distribution →
    no SmartScreen or Gatekeeper friction.
-3. **The gateway's historical advantage no longer applies to Codex.** Codex natively
-   speaks SigV4 to Bedrock via the AWS SDK credential chain. Pointing Codex at
-   a gateway forces `model_provider = "openai"` with a custom `base_url`,
-   abandoning the native `amazon-bedrock` code path. The gateway retains real
-   value only for *enforcement* (hard per-user budgets, central policy).
+3. **Native Codex integration.** Codex natively speaks SigV4 to Bedrock via the AWS SDK credential chain.
+
+**LLM Gateway provides additional value for:**
+
+1. **Hard enforcement.** The gateway retains real value for *enforcement* (hard per-user budgets, rate limiting, central policy).
+2. **Organizations without IdC.** Gateway with OIDC is faster to set up than IdC + SAML federation.
+
+**Trade-offs:**
+
+- Pointing Codex at a gateway requires `model_provider = "openai"` with a custom `base_url`,
+  bypassing the native `amazon-bedrock` code path.
+- Gateway adds operational overhead (~$100-150/mo + 0.1-0.25 FTE).
 
 ## Open questions that may shift the pick
 

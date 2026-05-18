@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: DynamoDB table for JWT middleware user-to-key mapping
+
+Parameters:
+  TableName:
+    Type: String
+    Default: codex-user-keys
+    Description: Name of the DynamoDB table for user API key mappings
+
+Resources:
+  UserKeyMappingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      AttributeDefinitions:
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        Enabled: true
+        AttributeName: ttl
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+      Tags:
+        - Key: project
+          Value: codex-bedrock
+        - Key: component
+          Value: jwt-middleware
+        - Key: managed-by
+          Value: cxwb
+
+Outputs:
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref UserKeyMappingTable
+    Export:
+      Name: !Sub "${AWS::StackName}-TableName"
+
+  TableArn:
+    Description: DynamoDB table ARN
+    Value: !GetAtt UserKeyMappingTable.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-TableArn"

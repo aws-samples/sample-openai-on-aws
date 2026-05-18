@@ -10,7 +10,17 @@ Parameters:
   OtelStackName:
     Type: String
     Default: codex-test-otel-collector
-    Description: Name of the OTel collector stack (exports CollectorEndpoint)
+    Description: Name of the OTel collector stack (exports CollectorEndpoint). Ignored if EnableOtel=false.
+
+  EnableOtel:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      When false (default), the gateway runs without OTel env vars and does NOT import
+      ${OtelStackName}-endpoint, so the OTel collector stack does not need to exist.
+      Set to true only if you've separately deployed an OTel collector and want the
+      gateway to forward traces to it.
 
   LiteLLMMasterKey:
     Type: String
@@ -42,11 +52,60 @@ Parameters:
 
   AllowedCidr:
     Type: String
-    Default: 10.0.0.0/16
+    Default: 10.0.0.0/8
     Description: >
-      CIDR allowed to reach the ALB. Defaults to the VPC CIDR (internal only).
-      Set to your corporate network CIDR or a specific /32 for restricted access.
-      Do NOT set to 0.0.0.0/0 in production.
+      CIDR allowed to reach the ALB. Defaults to RFC1918 private network (10.0.0.0/8).
+      For enterprise deployments, use your corporate network CIDR or VPN range.
+      Do NOT use 0.0.0.0/0 - AWS security scans will auto-delete the listener.
+      For public access, deploy AWS WAF with rate limiting and IP reputation filtering.
+
+  # JWT Middleware Parameters (optional - for OIDC authentication)
+  EnableJwtMiddleware:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Enable JWT middleware for OIDC/SSO authentication.
+      If false, uses standard API key authentication.
+
+  JwtMiddlewareImage:
+    Type: String
+    Default: ""
+    Description: >
+      JWT middleware container image URI (required if EnableJwtMiddleware=true).
+      Format: <account>.dkr.ecr.<region>.amazonaws.com/codex-jwt-middleware:latest
+
+  JwksUrl:
+    Type: String
+    Default: ""
+    Description: >
+      JWKS URL from IdP (required if EnableJwtMiddleware=true).
+      Example: https://your-tenant.okta.com/.well-known/jwks.json
+
+  JwtAudience:
+    Type: String
+    Default: ""
+    Description: >
+      Expected JWT audience claim (optional).
+      Leave empty to skip audience validation.
+
+  JwtIssuer:
+    Type: String
+    Default: ""
+    Description: >
+      Expected JWT issuer claim (optional).
+      Leave empty to skip issuer validation.
+
+  UserKeyMappingStackName:
+    Type: String
+    Default: ""
+    Description: >
+      CloudFormation stack name for user-key-mapping DynamoDB table (required if EnableJwtMiddleware=true).
+      Example: codex-user-key-mapping
+
+Conditions:
+  UseJwtMiddleware: !Equals [!Ref EnableJwtMiddleware, "true"]
+  OtelEnabled: !Equals [!Ref EnableOtel, "true"]
 
 Resources:
 
@@ -108,6 +167,23 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: "*"
+        # DynamoDB access for JWT middleware (conditional)
+        - !If
+          - UseJwtMiddleware
+          - PolicyName: DynamoDBAccess
+            PolicyDocument:
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - dynamodb:GetItem
+                    - dynamodb:PutItem
+                    - dynamodb:Query
+                    - dynamodb:Scan
+                  Resource: !Sub
+                    - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}"
+                    - TableName: !ImportValue
+                        Fn::Sub: "${UserKeyMappingStackName}-TableName"
+          - !Ref AWS::NoValue
 
   # --- Security Groups ---
 
@@ -131,8 +207,8 @@ Resources:
         Fn::Sub: "${NetworkingStackName}-VpcId"
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 4000
-          ToPort: 4000
+          FromPort: !If [UseJwtMiddleware, 8080, 4000]
+          ToPort: !If [UseJwtMiddleware, 8080, 4000]
           SourceSecurityGroupId: !Ref ALBSecurityGroup
 
   DBSecurityGroup:
@@ -200,6 +276,7 @@ Resources:
       ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
       TaskRoleArn: !GetAtt TaskRole.Arn
       ContainerDefinitions:
+        # LiteLLM Gateway Container
         - Name: litellm
           Image: !Ref LiteLLMImage
           PortMappings:
@@ -208,12 +285,17 @@ Resources:
           Environment:
             - Name: AWS_REGION
               Value: !Ref AwsRegion
-            - Name: OTEL_EXPORTER
-              Value: otlp_http
-            # Forward to the deployed OTel collector ALB
-            - Name: OTEL_ENDPOINT
-              Value: !ImportValue
-                Fn::Sub: "${OtelStackName}-endpoint"
+            - !If
+              - OtelEnabled
+              - Name: OTEL_EXPORTER
+                Value: otlp_http
+              - !Ref AWS::NoValue
+            - !If
+              - OtelEnabled
+              - Name: OTEL_ENDPOINT
+                Value: !ImportValue
+                  Fn::Sub: "${OtelStackName}-endpoint"
+              - !Ref AWS::NoValue
             - Name: DATABASE_URL
               Value: !Sub "postgresql://litellm:${DBPassword}@${RDSInstance.Endpoint.Address}:5432/litellm"
           Secrets:
@@ -225,6 +307,41 @@ Resources:
               awslogs-group: !Ref LogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: litellm
+
+        # JWT Middleware Container (conditional - only if EnableJwtMiddleware=true)
+        - !If
+          - UseJwtMiddleware
+          - Name: jwt-middleware
+            Image: !Ref JwtMiddlewareImage
+            PortMappings:
+              - ContainerPort: 8080
+            Environment:
+              - Name: JWKS_URL
+                Value: !Ref JwksUrl
+              - Name: JWT_AUDIENCE
+                Value: !Ref JwtAudience
+              - Name: JWT_ISSUER
+                Value: !Ref JwtIssuer
+              - Name: LITELLM_URL
+                Value: "http://localhost:4000"
+              - Name: AWS_REGION
+                Value: !Ref AWS::Region
+              - Name: DYNAMODB_TABLE
+                Value: !ImportValue
+                  Fn::Sub: "${UserKeyMappingStackName}-TableName"
+            Secrets:
+              - Name: LITELLM_MASTER_KEY
+                ValueFrom: !Sub "${LiteLLMSecret}:LITELLM_MASTER_KEY::"
+            DependsOn:
+              - ContainerName: litellm
+                Condition: START
+            LogConfiguration:
+              LogDriver: awslogs
+              Options:
+                awslogs-group: !Ref LogGroup
+                awslogs-region: !Ref AWS::Region
+                awslogs-stream-prefix: jwt-middleware
+          - !Ref AWS::NoValue
 
   # --- ALB ---
 
@@ -245,9 +362,11 @@ Resources:
       VpcId: !ImportValue
         Fn::Sub: "${NetworkingStackName}-VpcId"
       Protocol: HTTP
-      Port: 4000
+      # If JWT middleware enabled, target port 8080, otherwise target LiteLLM directly on port 4000
+      Port: !If [UseJwtMiddleware, 8080, 4000]
       TargetType: ip
-      HealthCheckPath: /health/liveliness
+      # If JWT middleware enabled, use /health, otherwise use LiteLLM's /health/liveliness
+      HealthCheckPath: !If [UseJwtMiddleware, /health, /health/liveliness]
 
   ALBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -279,8 +398,8 @@ Resources:
             - !Ref TaskSecurityGroup
           AssignPublicIp: ENABLED
       LoadBalancers:
-        - ContainerName: litellm
-          ContainerPort: 4000
+        - ContainerName: !If [UseJwtMiddleware, jwt-middleware, litellm]
+          ContainerPort: !If [UseJwtMiddleware, 8080, 4000]
           TargetGroupArn: !Ref ALBTargetGroup
       DeploymentConfiguration:
         MinimumHealthyPercent: 100
@@ -294,6 +413,7 @@ Outputs:
       Name: !Sub "${AWS::StackName}-GatewayEndpoint"
 
   OtelEndpoint:
+    Condition: OtelEnabled
     Description: OTel collector endpoint used by this deployment
     Value: !ImportValue
       Fn::Sub: "${OtelStackName}-endpoint"

@@ -491,7 +491,7 @@ Outputs:
     Value: !Sub |
       To use with Codex CLI authentication (native app):
 
-      poetry run cxwb init
+      uv run cxwb init
       - Provider Domain: ${DomainPrefix}.auth.${AWS::Region}.amazoncognito.com
       - User Pool ID: ${UserPool}
       - Client ID: ${UserPoolClient}
@@ -502,7 +502,7 @@ Outputs:
       To use the distribution landing page with Cognito web authentication:
 
       1. Run the init wizard:
-         poetry run cxwb init
+         uv run cxwb init
 
       2. When prompted for distribution method:
          - Select: "Authenticated Landing Page (IdP + ALB)"
@@ -517,7 +517,7 @@ Outputs:
       4. Press Enter to accept detected values → Configuration complete!
 
       5. Deploy the distribution stack:
-         poetry run cxwb deploy distribution
+         uv run cxwb deploy distribution
 
       6. After deployment, update the callback URLs:
          aws cognito-idp update-user-pool-client \

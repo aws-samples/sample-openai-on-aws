@@ -13,7 +13,10 @@ def stacks_for(p: dict) -> tuple[str, list[str]]:
     if p["auth"] == "idc":
         return p["bedrock_region"], [p["stack_name"]]
     if p["auth"] == "gateway":
-        return p["region"], [p["networking_stack"], p["otel_stack"], p["gateway_stack"]]
+        stacks = [p["networking_stack"], p["gateway_stack"]]
+        if p.get("enable_oidc"):
+            stacks.insert(1, p["user_key_mapping_stack"])
+        return p["region"], stacks
     raise click.ClickException(f"unknown auth: {p['auth']!r}")
 
 
