@@ -299,11 +299,11 @@ This guidance supports **OpenTelemetry monitoring** with CloudWatch for usage tr
 
 ### Three Monitoring Modes
 
-| Mode | Client Metrics | Server Metrics | Infrastructure | Monthly Cost | Best For |
-|------|----------------|----------------|----------------|--------------|----------|
-| **Local Only** | ✅ Yes | ❌ No | None | ~$10 | Small teams, quick start |
-| **Central Only** | ❌ No | ✅ Yes | ECS + ALB | ~$31 | Server visibility only |
-| **Hybrid** | ✅ Yes | ✅ Yes | ECS + ALB | ~$41 | Production (recommended) |
+| Mode | Client Metrics | Server Metrics | Infrastructure | Best For |
+|------|----------------|----------------|----------------|----------|
+| **Local Only** | ✅ Yes | ❌ No | None | Small teams, quick start |
+| **Central Only** | ❌ No | ✅ Yes | ECS + ALB | Server visibility only |
+| **Hybrid** | ✅ Yes | ✅ Yes | ECS + ALB | Production (recommended) |
 
 #### Local Collectors Only (Default)
 
