@@ -183,6 +183,8 @@ cd <profile-name>-config/
 # - Configure ~/.codex/config.toml with the key
 # - Add codex-gateway alias to your shell profile
 # - Remove any conflicting OpenAI authentication
+# - Install OTEL collector files to ~/.codex/otel/ (if Local/Hybrid mode)
+# - Auto-start the OTEL collector in the background (if monitoring enabled)
 
 # 4. Reload your shell
 source ~/.zshrc  # macOS
@@ -315,10 +317,10 @@ This guidance supports **OpenTelemetry monitoring** with CloudWatch for usage tr
 
 **Developer experience:**
 ```bash
-# Automatically installed via install.sh
-~/.codex/otel/start-collector.sh  # Start in background
+# Collector auto-started by install.sh. Management scripts available:
+~/.codex/otel/collector-status.sh # Check if running, view status
 ~/.codex/otel/stop-collector.sh   # Stop collector
-~/.codex/otel/collector-status.sh # Check status, memory usage
+~/.codex/otel/start-collector.sh  # Restart if stopped
 tail -f ~/.codex/otel/otelcol.log # View logs
 ```
 
@@ -373,8 +375,10 @@ During `cxwb init`, you'll be prompted:
 
 ### Test 1: Local Collector (if Local or Hybrid mode)
 
+**Note:** The `install.sh` script automatically starts the collector in the background after installation.
+
 ```bash
-# Step 1: Verify local collector is installed
+# Step 1: Verify local collector is installed and running
 ls -lh ~/.codex/otel/
 # Expected files:
 # - otelcol-local (~15MB binary)
@@ -383,15 +387,7 @@ ls -lh ~/.codex/otel/
 # - stop-collector.sh
 # - collector-status.sh
 
-# Step 2: Start the collector
-~/.codex/otel/start-collector.sh
-# Expected output:
-# Starting OTEL collector...
-# ✓ OTEL collector started (PID 12345)
-#   Sending metrics to: CloudWatch (region: us-west-2)
-#   Logs: /Users/you/.codex/otel/otelcol.log
-
-# Step 3: Check status
+# Step 2: Check collector status (should already be running)
 ~/.codex/otel/collector-status.sh
 # Expected output:
 # ✓ Collector running
@@ -401,7 +397,7 @@ ls -lh ~/.codex/otel/
 #   Region: us-west-2
 #   User: your-email@example.com
 
-# Step 4: Send test metric
+# Step 3: Send test metric
 curl -X POST http://localhost:4318/v1/metrics \
   -H "Content-Type: application/json" \
   -d '{
@@ -430,7 +426,7 @@ curl -X POST http://localhost:4318/v1/metrics \
   }'
 # Expected: HTTP 200 OK (or empty = success)
 
-# Step 5: Verify in CloudWatch (wait 1-2 minutes)
+# Step 4: Verify in CloudWatch (wait 1-2 minutes)
 aws cloudwatch list-metrics \
   --namespace "codex-test" \
   --region us-west-2
@@ -449,7 +445,7 @@ aws cloudwatch list-metrics \
 # Or check via console:
 # https://console.aws.amazon.com/cloudwatch/home?region=us-west-2#metricsV2:
 
-# Step 6: Check collector logs (troubleshooting)
+# Step 5: Check collector logs (troubleshooting)
 tail -f ~/.codex/otel/otelcol.log
 # Look for:
 # ✓ "Everything is ready. Begin running and processing data."
@@ -466,27 +462,9 @@ tail -f ~/.codex/otel/otelcol.log
 - [ ] No authentication errors in logs
 - [ ] Collector stops cleanly with `stop-collector.sh`
 
-### Test 2: Run Real Codex Session (Client Metrics)
+---
 
-```bash
-# Ensure local collector is running
-~/.codex/otel/collector-status.sh
-
-# Run Codex command
-codex-gateway exec "What is 2+2? Answer in one word."
-
-# Wait 1-2 minutes, then check CloudWatch metrics
-aws cloudwatch list-metrics \
-  --namespace "Codex" \
-  --region us-west-2
-
-# Expected metrics:
-# - codex.turn.duration_ms
-# - codex.turn.token_usage
-# - codex.api_request
-```
-
-### Test 3: Central Collector (if Central or Hybrid mode)
+### Test 2: Central Collector (if Central or Hybrid mode)
 
 ```bash
 # Step 1: Verify ECS collector is running
@@ -571,146 +549,6 @@ aws logs tail /ecs/codex-gateway-otel-collector-collector \
 - [ ] Metric appears in CloudWatch within 2 minutes
 - [ ] User attribution headers extracted (x-user-email, x-user-id)
 - [ ] No errors in ECS logs
-
-### Test 4: Gateway Metrics (Server-Side)
-
-```bash
-# If Central or Hybrid mode, LiteLLM gateway sends metrics automatically
-
-# Run a Codex command
-codex-gateway exec "What is 2+2?"
-
-# Wait 1-2 minutes, then check for gateway metrics
-aws cloudwatch list-metrics \
-  --namespace "Codex" \
-  --region us-west-2 \
-  --metric-name "litellm.request.total"
-
-# Or query with PromQL (in CloudWatch console):
-# sum({__name__="litellm.request.total"})
-```
-
-### Test 5: View Unified Dashboard (Hybrid mode)
-
-```bash
-# Query client-side metrics
-# PromQL: sum({__name__="codex.turn.duration_ms", source="client"})
-
-# Query server-side metrics
-# PromQL: sum({__name__="litellm.request.total", source="server"})
-
-# Query by user
-# PromQL: sum by (user_email) ({__name__=~"codex.*token.*"})
-
-# Query cost by department (if headers propagated)
-# PromQL: sum by (department) ({__name__=~".*token.*"})
-
-# Open CloudWatch console:
-open "https://console.aws.amazon.com/cloudwatch/home?region=us-west-2#prometheus:query"
-```
-
-### Troubleshooting OTEL
-
-#### Issue: Local collector won't start
-
-**Symptom:** `start-collector.sh` fails or no PID shown
-
-**Debug:**
-```bash
-# Check if port 4318 is available
-lsof -i :4318
-# If occupied, kill process: kill <PID>
-
-# Check AWS credentials
-aws sts get-caller-identity
-# If expired: aws sso login --profile your-profile
-
-# Check collector logs
-tail -100 ~/.codex/otel/otelcol.log
-# Look for error messages
-
-# Test manually
-cd ~/.codex/otel
-./otelcol-local --config otel-config.yaml
-# Press Ctrl+C to stop
-```
-
-#### Issue: Metrics not appearing in CloudWatch
-
-**Checklist:**
-1. Wait 1-2 minutes (metrics take time to propagate)
-2. Check collector is running: `ps aux | grep otelcol`
-3. Verify no authentication errors in logs
-4. Confirm region matches: `us-west-2`
-5. Check namespace is correct (service.name becomes namespace)
-
-**Debug:**
-```bash
-# Check collector health
-curl http://localhost:13133/
-# Expected: HTTP 200
-
-# Check CloudWatch endpoint is reachable
-curl -v https://monitoring.us-west-2.amazonaws.com/
-# Expected: HTTP 403 (endpoint exists, but needs auth)
-
-# Verify IAM permissions
-aws iam get-user --query 'User.Arn'
-# Check your user/role has: monitoring:PutMetricData
-```
-
-#### Issue: ECS collector not starting
-
-**Symptom:** ECS service shows desired=1, running=0
-
-**Debug:**
-```bash
-# List tasks
-TASK_ARN=$(aws ecs list-tasks \
-  --cluster codex-gateway-otel-collector-cluster \
-  --region us-west-2 \
-  --query 'taskArns[0]' \
-  --output text)
-
-# Describe task to see failure reason
-aws ecs describe-tasks \
-  --cluster codex-gateway-otel-collector-cluster \
-  --tasks $TASK_ARN \
-  --region us-west-2 \
-  --query 'tasks[0].{stopCode:stopCode,stopReason:stopReason,containers:containers[*].{name:name,reason:reason}}'
-
-# Common issues:
-# 1. SSM parameter not found → check OTelConfig exists
-# 2. IAM permission denied → check TaskRole has monitoring:PutMetricData
-# 3. ALB health check failing → check security groups allow ALB → Task
-```
-
-#### Issue: User attribution not working
-
-**Symptom:** Metrics appear but no user.email dimension
-
-**Fix for Local Collector:**
-```bash
-# Check config has user email
-grep user.email ~/.codex/otel/otel-config.yaml
-# Should show: value: "your-email@example.com"
-
-# If placeholder, edit file:
-sed -i '' 's/__USER_EMAIL__/your-email@example.com/g' ~/.codex/otel/otel-config.yaml
-
-# Restart collector
-~/.codex/otel/stop-collector.sh
-~/.codex/otel/start-collector.sh
-```
-
-**Fix for Central Collector:**
-```bash
-# Check LiteLLM is sending user headers
-# Look for x-user-email, x-user-id in request logs
-
-# If missing, verify JWT middleware is extracting claims correctly
-aws logs tail /ecs/litellm --follow --region us-west-2 --filter-pattern "jwt-middleware"
-```
 
 ---
 
@@ -1300,6 +1138,107 @@ curl https://<gateway-url>/api/my-key \
   -v
 
 # If JWT is valid but key creation fails, check LiteLLM master key in Secrets Manager
+```
+
+### Issue 11: Local OTEL Collector Won't Start
+
+**Symptom:** `start-collector.sh` fails or no PID shown
+
+**Debug:**
+```bash
+# Check if port 4318 is available
+lsof -i :4318
+# If occupied, kill process: kill <PID>
+
+# Check AWS credentials
+aws sts get-caller-identity
+# If expired: aws sso login --profile your-profile
+
+# Check collector logs
+tail -100 ~/.codex/otel/otelcol.log
+# Look for error messages
+
+# Test manually
+cd ~/.codex/otel
+./otelcol-local --config otel-config.yaml
+# Press Ctrl+C to stop
+```
+
+### Issue 12: OTEL Metrics Not Appearing in CloudWatch
+
+**Checklist:**
+1. Wait 1-2 minutes (metrics take time to propagate)
+2. Check collector is running: `ps aux | grep otelcol`
+3. Verify no authentication errors in logs
+4. Confirm region matches: `us-west-2`
+5. Check namespace is correct (service.name becomes namespace)
+
+**Debug:**
+```bash
+# Check collector health
+curl http://localhost:13133/
+# Expected: HTTP 200
+
+# Check CloudWatch endpoint is reachable
+curl -v https://monitoring.us-west-2.amazonaws.com/
+# Expected: HTTP 403 (endpoint exists, but needs auth)
+
+# Verify IAM permissions
+aws iam get-user --query 'User.Arn'
+# Check your user/role has: monitoring:PutMetricData
+```
+
+### Issue 13: ECS OTEL Collector Not Starting
+
+**Symptom:** ECS service shows desired=1, running=0
+
+**Debug:**
+```bash
+# List tasks
+TASK_ARN=$(aws ecs list-tasks \
+  --cluster codex-gateway-otel-collector-cluster \
+  --region us-west-2 \
+  --query 'taskArns[0]' \
+  --output text)
+
+# Describe task to see failure reason
+aws ecs describe-tasks \
+  --cluster codex-gateway-otel-collector-cluster \
+  --tasks $TASK_ARN \
+  --region us-west-2 \
+  --query 'tasks[0].{stopCode:stopCode,stopReason:stopReason,containers:containers[*].{name:name,reason:reason}}'
+
+# Common issues:
+# 1. SSM parameter not found → check OTelConfig exists
+# 2. IAM permission denied → check TaskRole has monitoring:PutMetricData
+# 3. ALB health check failing → check security groups allow ALB → Task
+```
+
+### Issue 14: OTEL User Attribution Not Working
+
+**Symptom:** Metrics appear but no user.email dimension
+
+**Fix for Local Collector:**
+```bash
+# Check config has user email
+grep user.email ~/.codex/otel/otel-config.yaml
+# Should show: value: "your-email@example.com"
+
+# If placeholder, edit file:
+sed -i '' 's/__USER_EMAIL__/your-email@example.com/g' ~/.codex/otel/otel-config.yaml
+
+# Restart collector
+~/.codex/otel/stop-collector.sh
+~/.codex/otel/start-collector.sh
+```
+
+**Fix for Central Collector:**
+```bash
+# Check LiteLLM is sending user headers
+# Look for x-user-email, x-user-id in request logs
+
+# If missing, verify JWT middleware is extracting claims correctly
+aws logs tail /ecs/litellm --follow --region us-west-2 --filter-pattern "jwt-middleware"
 ```
 
 ### General Debugging Tips
