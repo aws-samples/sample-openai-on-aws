@@ -148,6 +148,7 @@ def _deploy_gateway(p: dict) -> None:
         template=paths.LITELLM_DASHBOARD_TEMPLATE,
         parameters={
             "DashboardName": dashboard_name,
+            "MetricsNamespace": "Codex",  # Match OTEL collector namespace
         },
         capabilities=[],
     )

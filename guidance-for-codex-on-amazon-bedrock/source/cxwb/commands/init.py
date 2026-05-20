@@ -292,6 +292,12 @@ def _gateway_flow() -> dict:
     click.echo("\n📊 Monitoring Configuration")
     data["monitoring"] = _prompt_monitoring()
 
+    # Add OTel stack name if Central or Hybrid mode
+    if data["monitoring"].get("enabled") and data["monitoring"].get("mode") in ["central", "hybrid"]:
+        data["otel_stack"] = _text(
+            "OTel collector stack name:", default="codex-otel-collector"
+        )
+
     return data
 
 

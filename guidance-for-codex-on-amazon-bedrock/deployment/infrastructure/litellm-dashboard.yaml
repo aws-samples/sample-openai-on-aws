@@ -44,7 +44,7 @@ Resources:
                 "period": 300,
                 "stat": "Average",
                 "metrics": [
-                  [ "${MetricsNamespace}", "gen_ai.client.operation.duration" ]
+                  [ { "expression": "SEARCH('{${MetricsNamespace},OTelLib} MetricName=\"gen_ai.client.operation.duration\"', 'Average', 300)", "id": "e1" } ]
                 ],
                 "yAxis": {
                   "left": {
@@ -67,7 +67,7 @@ Resources:
                 "period": 300,
                 "stat": "SampleCount",
                 "metrics": [
-                  [ "${MetricsNamespace}", "gen_ai.client.operation.duration" ]
+                  [ { "expression": "SEARCH('{${MetricsNamespace},OTelLib} MetricName=\"gen_ai.client.operation.duration\"', 'SampleCount', 300)", "id": "e1" } ]
                 ],
                 "yAxis": {
                   "left": {
@@ -90,7 +90,7 @@ Resources:
                 "period": 300,
                 "stat": "Sum",
                 "metrics": [
-                  [ "${MetricsNamespace}", "gen_ai.client.token.usage" ]
+                  [ { "expression": "SEARCH('{${MetricsNamespace},OTelLib} MetricName=\"gen_ai.client.token.usage\"', 'Sum', 300)", "id": "e1" } ]
                 ],
                 "yAxis": {
                   "left": {
@@ -106,14 +106,14 @@ Resources:
               "width": 12,
               "height": 6,
               "properties": {
-                "title": "Request Cost (litellm.request_total_cost_usd)",
+                "title": "Request Cost (gen_ai.client.token.cost)",
                 "region": "${AWS::Region}",
                 "view": "timeSeries",
                 "stacked": false,
                 "period": 300,
                 "stat": "Sum",
                 "metrics": [
-                  [ "${MetricsNamespace}", "litellm.request_total_cost_usd" ]
+                  [ { "expression": "SEARCH('{${MetricsNamespace},OTelLib} MetricName=\"gen_ai.client.token.cost\"', 'Sum', 300)", "id": "e1" } ]
                 ],
                 "yAxis": {
                   "left": {

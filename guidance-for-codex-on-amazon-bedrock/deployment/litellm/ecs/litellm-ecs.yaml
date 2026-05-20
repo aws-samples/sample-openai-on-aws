@@ -289,10 +289,8 @@ Resources:
             - Name: OTEL_EXPORTER
               Value: otlp_http
             - Name: OTEL_ENDPOINT
-              Value: !Sub
-                - "${Endpoint}/v1/metrics"
-                - Endpoint: !ImportValue
-                    Fn::Sub: "${OtelStackName}-endpoint"
+              Value: !ImportValue
+                Fn::Sub: "${OtelStackName}-endpoint"
             - Name: OTEL_SERVICE_NAME
               Value: litellm-gateway
             # Enable metrics export (required for LiteLLM OTEL integration)

@@ -303,9 +303,11 @@ This guidance supports **OpenTelemetry monitoring** with CloudWatch for usage tr
 
 | Mode | Client Metrics | Server Metrics | Infrastructure | Best For |
 |------|----------------|----------------|----------------|----------|
-| **Local Only** | ✅ Yes | ❌ No | None | Small teams, quick start |
-| **Central Only** | ❌ No | ✅ Yes | ECS + ALB | Server visibility only |
-| **Hybrid** | ✅ Yes | ✅ Yes | ECS + ALB | Production (recommended) |
+| **Local Only** | ⚠️ Partial* | ❌ No | None | Small teams (limited support) |
+| **Central Only** | ❌ No | ✅ Yes | ECS + ALB | Production (recommended) |
+| **Hybrid** | ⚠️ Partial* | ✅ Yes | ECS + ALB | Server + client (limited) |
+
+*Note: Codex CLI v0.130.0 does not support OTEL exports. Local collector infrastructure is in place but client metrics are not sent.
 
 #### Local Collectors Only (Default)
 
@@ -344,13 +346,13 @@ tail -f ~/.codex/otel/otelcol.log # View logs
 - `litellm.request_total_cost_usd` - Request costs in USD
 - Dimensions: OTelLib, gen_ai.operation.name
 
-#### Hybrid (Recommended for Production)
+#### Hybrid (Limited Support)
 
 **What you get:**
-- **Complete visibility**: Client + Server metrics combined
-- **Single dashboard**: Unified view of all metrics
-- **User attribution**: Track costs per user/team/department
-- **Best for**: Production deployments requiring full observability
+- **Server-side metrics**: Working (LiteLLM → Central Collector → CloudWatch)
+- **Client-side metrics**: ⚠️ Not supported (Codex CLI v0.130.0 lacks OTEL export)
+- **Local collector**: Installed but unused
+- **Best for**: Testing only - use Central Only for production
 
 ### Configuration During Wizard
 
@@ -365,190 +367,55 @@ During `cxwb init`, you'll be prompted:
 ```
 
 **Recommendation:**
-- **Quick start / Evaluation:** Choose "Local collectors only"
-- **Production deployment:** Choose "Hybrid"
-- **Server-only visibility:** Choose "Central collector only"
+- **Production deployment:** Choose "Central collector only" (server-side metrics only)
+- **Testing/Development:** Choose "Hybrid" (note: client metrics not working)
+- **Opt-out:** Choose "None" to disable monitoring
 
 ---
 
 ## Testing OTEL Monitoring
 
-### Test 1: Local Collector (if Local or Hybrid mode)
+### Verify Central Collector (Central or Hybrid mode)
 
-**Note:** The `install.sh` script automatically starts the collector in the background after installation.
-
-```bash
-# Step 1: Verify local collector is installed and running
-ls -lh ~/.codex/otel/
-# Expected files:
-# - otelcol-local (~15MB binary)
-# - otel-config.yaml
-# - start-collector.sh
-# - stop-collector.sh
-# - collector-status.sh
-
-# Step 2: Check collector status (should already be running)
-~/.codex/otel/collector-status.sh
-# Expected output:
-# ✓ Collector running
-#   PID: 12345
-#   Started: Thu May 14 10:45:00 2026
-#   Memory: ~45MB
-#   Region: us-west-2
-#   User: your-email@example.com
-
-# Step 3: Send test metric
-curl -X POST http://localhost:4318/v1/metrics \
-  -H "Content-Type: application/json" \
-  -d '{
-    "resourceMetrics": [{
-      "resource": {
-        "attributes": [
-          {"key": "service.name", "value": {"stringValue": "codex-test"}},
-          {"key": "user.email", "value": {"stringValue": "test@example.com"}}
-        ]
-      },
-      "scopeMetrics": [{
-        "metrics": [{
-          "name": "codex.test.counter",
-          "unit": "1",
-          "sum": {
-            "dataPoints": [{
-              "asInt": "42",
-              "timeUnixNano": "'$(date +%s)000000000'"
-            }],
-            "aggregationTemporality": 2,
-            "isMonotonic": true
-          }
-        }]
-      }]
-    }]
-  }'
-# Expected: HTTP 200 OK (or empty = success)
-
-# Step 4: Verify in CloudWatch (wait 1-2 minutes)
-aws cloudwatch list-metrics \
-  --namespace "codex-test" \
-  --region us-west-2
-
-# Expected output:
-# {
-#   "Metrics": [
-#     {
-#       "Namespace": "codex-test",
-#       "MetricName": "codex.test.counter",
-#       ...
-#     }
-#   ]
-# }
-
-# Or check via console:
-# https://console.aws.amazon.com/cloudwatch/home?region=us-west-2#metricsV2:
-
-# Step 5: Check collector logs (troubleshooting)
-tail -f ~/.codex/otel/otelcol.log
-# Look for:
-# ✓ "Everything is ready. Begin running and processing data."
-# ✓ "Exporting metrics" messages
-# ✗ NO "SignatureDoesNotMatch" errors
-# ✗ NO "AccessDenied" errors
-```
-
-**✅ Local Collector Success Criteria:**
-- [ ] Collector starts without errors (PID shown)
-- [ ] Status shows running with ~30-50MB memory
-- [ ] Test metric returns HTTP 200
-- [ ] Metric appears in CloudWatch within 2 minutes
-- [ ] No authentication errors in logs
-- [ ] Collector stops cleanly with `stop-collector.sh`
-
----
-
-### Test 2: Central Collector (if Central or Hybrid mode)
+⚠️ **Note on Local Collector:** If you selected Local or Hybrid mode, the local collector is installed but **Codex CLI v0.130.0 does not export OTEL metrics**. Only server-side (central collector) metrics will work.
 
 ```bash
-# Step 1: Verify ECS collector is running
-aws ecs describe-services \
-  --cluster codex-gateway-otel-collector-cluster \
-  --services codex-gateway-otel-collector-service \
-  --region us-west-2 \
-  --query 'services[0].{desired:desiredCount,running:runningCount,status:status}'
+# Step 1: Make a test request with Codex CLI
+codex exec 'Say hello in one word'
+# This sends metrics: LiteLLM → Central Collector → CloudWatch
 
-# Expected:
-# {
-#   "desired": 1,
-#   "running": 1,
-#   "status": "ACTIVE"
-# }
-
-# Step 2: Get collector endpoint
-COLLECTOR_ENDPOINT=$(aws cloudformation describe-stacks \
-  --stack-name codex-gateway-otel-collector \
-  --region us-west-2 \
-  --query 'Stacks[0].Outputs[?OutputKey==`CollectorEndpoint`].OutputValue' \
-  --output text)
-
-echo "Collector endpoint: $COLLECTOR_ENDPOINT"
-
-# Step 3: Test collector health
-curl ${COLLECTOR_ENDPOINT}/
-# Expected: HTTP 200 or 404 (ALB is responding)
-
-# Step 4: Send test metric
-curl -X POST "${COLLECTOR_ENDPOINT}/v1/metrics" \
-  -H "Content-Type: application/json" \
-  -H "x-user-email: test@example.com" \
-  -H "x-user-id: testuser" \
-  -d '{
-    "resourceMetrics": [{
-      "resource": {
-        "attributes": [
-          {"key": "service.name", "value": {"stringValue": "codex-gateway-test"}}
-        ]
-      },
-      "scopeMetrics": [{
-        "metrics": [{
-          "name": "codex.gateway.test.counter",
-          "sum": {
-            "dataPoints": [{
-              "asInt": "100",
-              "timeUnixNano": "'$(date +%s)000000000'"
-            }],
-            "aggregationTemporality": 2,
-            "isMonotonic": true
-          }
-        }]
-      }]
-    }]
-  }'
-
-# Expected: HTTP 200 OK
-
-# Step 5: Verify in CloudWatch (wait 1-2 minutes)
+# Step 2: Wait 30 seconds for metrics to appear, then check CloudWatch
 aws cloudwatch list-metrics \
-  --namespace "codex-gateway-test" \
-  --region us-west-2
+  --namespace Codex \
+  --region us-east-1 \
+  --query 'Metrics[0:5].[MetricName]' \
+  --output table
 
-# Step 6: Check ECS collector logs
-aws logs tail /ecs/codex-gateway-otel-collector-collector \
-  --follow \
-  --region us-west-2
-# Press Ctrl+C to stop
+# Expected metrics:
+# - gen_ai.client.operation.duration (latency)
+# - gen_ai.client.token.usage (token consumption)
+# - gen_ai.client.token.cost (cost in USD)
 
-# Look for:
-# ✓ "Everything is ready. Begin running and processing data."
-# ✓ Receiver endpoints: 0.0.0.0:4317, 0.0.0.0:4318
-# ✓ "Exporting metrics" messages
-# ✗ NO authentication errors
+# Step 3: View dashboard
+# Get dashboard URL from stack outputs
+aws cloudformation describe-stacks \
+  --stack-name <your-gateway-stack>-dashboard \
+  --region us-east-1 \
+  --query 'Stacks[0].Outputs[?OutputKey==`DashboardURL`].OutputValue' \
+  --output text
+
+# Open URL in browser - you should see:
+# - Request latency graph
+# - Request count
+# - Token usage
+# - Cost tracking
 ```
 
-**✅ Central Collector Success Criteria:**
-- [ ] ECS service shows desired=1, running=1
-- [ ] Collector endpoint responds to health check
-- [ ] Test metric returns HTTP 200
-- [ ] Metric appears in CloudWatch within 2 minutes
-- [ ] User attribution headers extracted (x-user-email, x-user-id)
-- [ ] No errors in ECS logs
+**✅ Success Criteria:**
+- [ ] Codex request completes successfully
+- [ ] Metrics appear in `Codex` namespace within 1 minute
+- [ ] Dashboard shows data (graphs populated)
+- [ ] User attribution visible (check EMF logs for `metadata.user_api_key_user_id`)
 
 ---
 
