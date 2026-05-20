@@ -45,10 +45,18 @@ Parameters:
     Default: ''
     Description: OIDC client ID for ALB JWT audience (aud) claim validation
 
+  EnableAnalytics:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Enable dual-export (OTLP + EMF) for analytics pipeline. When false, only OTLP export is used.
+
 Conditions:
   HasCustomDomain: !Not [!Equals [!Ref CustomDomainName, '']]
   HasJwtAuth: !Not [!Equals [!Ref OidcIssuerUrl, '']]
   HasOidcClientId: !Not [!Equals [!Ref OidcClientId, '']]
+  AnalyticsEnabled: !Equals [!Ref EnableAnalytics, 'true']
+  AnalyticsDisabled: !Not [!Equals [!Ref EnableAnalytics, 'true']]
 
 # Rules section removed - validation handled by deployment script
 
@@ -77,6 +85,7 @@ Resources:
 
   MetricsLogGroup:
     Type: AWS::Logs::LogGroup
+    Condition: AnalyticsEnabled
     Properties:
       LogGroupName: !Sub "/aws/${AWS::StackName}/metrics"
       RetentionInDays: 30
@@ -320,7 +329,9 @@ Resources:
               - Effect: Allow
                 Action:
                   - cloudwatch:PutMetricData
+                  - monitoring:PutMetricData
                 Resource: '*'
+              # EMF exporter needs CloudWatch Logs permissions
               - Effect: Allow
                 Action:
                   - logs:CreateLogStream
@@ -330,6 +341,8 @@ Resources:
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codex/metrics'
                   - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codex/metrics:*'
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/litellm/metrics'
+                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/litellm/metrics:*'
         # We keep the CloudWatch permissions but remove the AssumeRole permission
         # that was related to the overly permissive trust policy
         - PolicyName: SSMParameterAccess
@@ -417,68 +430,25 @@ Resources:
                 action: insert
 
         exporters:
+          # Debug exporter for troubleshooting
+          debug:
+            verbosity: detailed
+            sampling_initial: 10
+            sampling_thereafter: 100
+
           # Accept but drop logs and traces until we have a concrete use case
-          # — avoids ALB 4xx storms from Codex's periodic exporter retries.
-          # `debug` with verbosity=basic is ADOT's built-in sink equivalent
-          # to /dev/null for this purpose.
           debug/sink:
             verbosity: basic
+
+          # CloudWatch EMF (AWS OTEL Collector doesn't support native OTLP yet)
           awsemf:
+            region: ${AWS::Region}
             namespace: ${MetricsNamespace}
             log_group_name: /aws/codex/metrics
             dimension_rollup_option: "ZeroAndSingleDimensionRollup"
-            region: ${AWS::Region}
             output_destination: cloudwatch
-            log_retention: 7
             resource_to_telemetry_conversion:
               enabled: true
-            # Metric-name set verified against Codex 0.130.0-alpha.7 on
-            # 2026-05-08 (see PLAN.md pre-flight spike). Prior declarations
-            # referenced names (codex.code_edit_tool.*, codex.lines_of_code,
-            # codex.cost.usage, codex.token.usage) that Codex does not emit.
-            metric_declarations:
-              # Catch-all (keeps us forward-compatible with new Codex metrics).
-              - dimensions: [[OTelLib]]
-                metric_name_selectors: [".*"]
-
-              # Per-user attribution (primary dashboard dimension).
-              - dimensions: [[user.id, OTelLib]]
-                metric_name_selectors: [".*"]
-
-              # Per-model rollups.
-              - dimensions: [[model, OTelLib]]
-                metric_name_selectors: [".*"]
-              - dimensions: [[user.id, model, OTelLib]]
-                metric_name_selectors: [".*"]
-
-              # API request status (critical for error tracking — 4xx/5xx from
-              # Bedrock backend arrive as status="404" / success="false").
-              - dimensions: [[status, OTelLib]]
-                metric_name_selectors: ["codex.api_request", "codex.api_request.duration_ms"]
-              - dimensions: [[user.id, status, OTelLib]]
-                metric_name_selectors: ["codex.api_request", "codex.api_request.duration_ms"]
-
-              # Token usage breakdown by type (input|output|cached_input|reasoning_output|total).
-              - dimensions: [[token_type, OTelLib]]
-                metric_name_selectors: ["codex.turn.token_usage"]
-              - dimensions: [[user.id, token_type, OTelLib]]
-                metric_name_selectors: ["codex.turn.token_usage"]
-
-              # Session-origin rollups (cli vs. desktop vs. VS Code).
-              - dimensions: [[session_source, OTelLib]]
-                metric_name_selectors: [".*"]
-              - dimensions: [[originator, OTelLib]]
-                metric_name_selectors: [".*"]
-
-              # Department / team / cost-center if propagated via headers
-              # (generator does not emit these today; kept for operator-added
-              # header-injection downstream of distribution).
-              - dimensions: [[department, OTelLib]]
-                metric_name_selectors: [".*"]
-              - dimensions: [[team.id, OTelLib]]
-                metric_name_selectors: [".*"]
-              - dimensions: [[cost_center, OTelLib]]
-                metric_name_selectors: [".*"]
 
         service:
           extensions: [health_check]
@@ -492,7 +462,7 @@ Resources:
             metrics:
               receivers: [otlp]
               processors: [attributes, resource, batch/metrics]
-              exporters: [awsemf]
+              exporters: [debug, awsemf]
             logs:
               receivers: [otlp]
               exporters: [debug/sink]

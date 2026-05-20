@@ -1,0 +1,87 @@
+# OpenTelemetry Collector Configuration - Local Mode
+# Runs on developer machine, exports to CloudWatch native OTLP endpoint
+# Uses AWS SSO credentials from developer's environment
+
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+    path: /
+
+  sigv4auth:
+    service: "monitoring"
+    region: "__AWS_REGION__"
+    # Uses credentials from environment (aws sso login)
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+        # Accept OTLP from Codex client on localhost only
+
+processors:
+  # Add user attribution
+  attributes:
+    actions:
+      - key: user.email
+        value: "__USER_EMAIL__"
+        action: insert
+      - key: user.id
+        value: "__USER_ID__"
+        action: insert
+
+  # Mark as client-side metrics
+  resource:
+    attributes:
+      - key: source
+        value: "client"
+        action: insert
+      - key: collector.type
+        value: "local"
+        action: insert
+
+  # Batch for efficiency
+  batch:
+    timeout: 10s
+    send_batch_size: 100
+
+exporters:
+  # CloudWatch native OTLP endpoint
+  otlphttp:
+    endpoint: "https://monitoring.__AWS_REGION__.amazonaws.com"
+    auth:
+      authenticator: sigv4auth
+    tls:
+      insecure: false
+    compression: gzip
+
+  # Debug exporter for local troubleshooting
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  extensions: [health_check, sigv4auth]
+
+  telemetry:
+    logs:
+      level: info
+      encoding: console
+      output_paths: [stdout]
+      error_output_paths: [stderr]
+
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [attributes, resource, batch]
+      exporters: [otlphttp]
+
+    # Drop logs and traces for now (Codex primarily sends metrics)
+    logs:
+      receivers: [otlp]
+      exporters: [debug]
+
+    traces:
+      receivers: [otlp]
+      exporters: [debug]

@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'LiteLLM Gateway — CloudWatch dashboard for request latency, throughput, token usage, and costs'
+
+Parameters:
+  DashboardName:
+    Type: String
+    Default: LiteLLMGateway
+    Description: Name of the CloudWatch dashboard
+
+  MetricsNamespace:
+    Type: String
+    Default: LiteLLMGateway
+    Description: CloudWatch namespace for LiteLLM metrics (must match otel-collector-config.yaml)
+
+Resources:
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Ref DashboardName
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "text",
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 2,
+              "properties": {
+                "markdown": "# LiteLLM Gateway — Usage & Performance\n\nMetrics from LiteLLM OTEL integration → ADOT collector → CloudWatch. Shows request latency, token usage, and estimated costs."
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 2,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Request Latency (gen_ai.client.operation.duration)",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "stacked": false,
+                "period": 300,
+                "stat": "Average",
+                "metrics": [
+                  [ "${MetricsNamespace}", "gen_ai.client.operation.duration" ]
+                ],
+                "yAxis": {
+                  "left": {
+                    "label": "Seconds"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 2,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Request Count (gen_ai.client.operation.duration)",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "stacked": false,
+                "period": 300,
+                "stat": "SampleCount",
+                "metrics": [
+                  [ "${MetricsNamespace}", "gen_ai.client.operation.duration" ]
+                ],
+                "yAxis": {
+                  "left": {
+                    "label": "Count"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 8,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Token Usage (gen_ai.client.token.usage)",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "stacked": false,
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                  [ "${MetricsNamespace}", "gen_ai.client.token.usage" ]
+                ],
+                "yAxis": {
+                  "left": {
+                    "label": "Tokens"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 8,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Request Cost (litellm.request_total_cost_usd)",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "stacked": false,
+                "period": 300,
+                "stat": "Sum",
+                "metrics": [
+                  [ "${MetricsNamespace}", "litellm.request_total_cost_usd" ]
+                ],
+                "yAxis": {
+                  "left": {
+                    "label": "USD"
+                  }
+                }
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 14,
+              "width": 24,
+              "height": 6,
+              "properties": {
+                "title": "All Available Metrics",
+                "region": "${AWS::Region}",
+                "view": "timeSeries",
+                "stacked": false,
+                "period": 300,
+                "stat": "Average",
+                "metrics": [
+                  [ { "expression": "SEARCH('{${MetricsNamespace},OTelLib} MetricName', 'Average', 300)", "id": "e1" } ]
+                ]
+              }
+            }
+          ]
+        }
+
+Outputs:
+  DashboardURL:
+    Description: Direct link to the dashboard in CloudWatch
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards/dashboard/${DashboardName}'
+  DashboardName:
+    Value: !Ref DashboardName
+    Export:
+      Name: !Sub '${AWS::StackName}-DashboardName'

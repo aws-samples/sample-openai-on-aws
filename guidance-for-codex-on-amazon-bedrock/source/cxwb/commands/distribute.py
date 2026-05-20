@@ -65,9 +65,96 @@ def _build_gateway_bundle(p: dict, outdir: Path) -> Path:
     ]
     if p.get("key_mint_url"):
         cmd += ["--key-mint-url", p["key_mint_url"]]
+
+    # Add local OTEL configuration if enabled
+    monitoring = p.get("monitoring", {})
+    if monitoring.get("enabled") and monitoring.get("mode") in ["local", "hybrid"]:
+        cmd += [
+            "--enable-local-otel",
+            "--aws-region", p.get("region", "us-east-1"),
+            "--user-email", "${USER}@example.com",  # Placeholder, updated during install
+        ]
+
     click.echo(f"Running {paths.GENERATE_GATEWAY_BUNDLE.name}...")
     subprocess.run(cmd, check=True)
+
+    # Add local collector binaries and scripts if enabled
+    if monitoring.get("enabled") and monitoring.get("mode") in ["local", "hybrid"]:
+        _add_local_collector_files(p, outdir)
+
     return outdir
+
+
+def _add_local_collector_files(p: dict, outdir: Path):
+    """Add local OTEL collector binaries and configuration to bundle."""
+    click.echo("Adding local OTEL collector to bundle...")
+
+    import platform
+    from .. import paths
+
+    # Detect current platform for binary selection
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    if system == "darwin":
+        if machine in ["arm64", "aarch64"]:
+            binary_name = "otelcol-local-darwin-arm64"
+        else:
+            binary_name = "otelcol-local-darwin-amd64"
+    elif system == "linux":
+        binary_name = "otelcol-local-linux-amd64"
+    elif system == "windows":
+        binary_name = "otelcol-local-windows-amd64.exe"
+    else:
+        click.echo(f"⚠  Unsupported platform: {system}-{machine}")
+        click.echo("   Local collector will not be included")
+        return
+
+    # Copy collector binary
+    binaries_dir = paths.REPO_ROOT / "deployment" / "binaries"
+    binary_src = binaries_dir / binary_name
+
+    if not binary_src.exists():
+        click.echo(f"⚠  Collector binary not found: {binary_src}")
+        click.echo("   Run: deployment/scripts/build-local-collector.sh")
+        click.echo("   Skipping local collector...")
+        return
+
+    binary_dst = outdir / "otelcol-local"
+    if system == "windows":
+        binary_dst = outdir / "otelcol-local.exe"
+
+    shutil.copy(binary_src, binary_dst)
+    binary_dst.chmod(0o755)
+    click.echo(f"✓ Added collector binary: {binary_name}")
+
+    # Copy config template
+    templates_dir = paths.REPO_ROOT / "deployment" / "templates"
+    config_src = templates_dir / "otel-local-config.yaml"
+    config_dst = outdir / "otel-config.yaml"
+
+    # Read and substitute placeholders
+    config_content = config_src.read_text()
+    config_content = config_content.replace("__AWS_REGION__", p.get("region", "us-east-1"))
+    config_content = config_content.replace("__USER_EMAIL__", "${USER}@example.com")  # Placeholder
+    config_content = config_content.replace("__USER_ID__", "${USER}")
+    config_dst.write_text(config_content)
+    click.echo("✓ Added collector configuration")
+
+    # Copy management scripts
+    for script_name in ["start-collector.sh", "stop-collector.sh", "collector-status.sh"]:
+        script_src = templates_dir / f"{script_name}.template"
+        script_dst = outdir / script_name
+
+        script_content = script_src.read_text()
+        script_content = script_content.replace("__AWS_REGION__", p.get("region", "us-east-1"))
+        script_content = script_content.replace("__AWS_PROFILE__", p.get("codex_profile_name", "default"))
+        script_content = script_content.replace("__USER_EMAIL__", "${USER}@example.com")
+        script_dst.write_text(script_content)
+        script_dst.chmod(0o755)
+
+    click.echo("✓ Added collector management scripts")
+    click.echo("✓ Local collector bundle complete")
 
 
 def _zip_bundle(bundle_dir: Path) -> Path:
@@ -275,6 +362,10 @@ def run(
         gateway_url = _gateway_endpoint_from_stack(p)
         base_url = gateway_url.rstrip("/v1")
 
+        # Get the correct secret name from gateway stack
+        gateway_stack = p.get("gateway_stack", "codex-litellm-gateway")
+        secret_name = f"{gateway_stack}/litellm-master-key"
+
         click.echo("\n" + "="*70)
         click.echo("📊 ADMIN ACCESS TO LITELLM DASHBOARD")
         click.echo("="*70)
@@ -283,15 +374,15 @@ def run(
         click.echo("\nTo retrieve the master key:")
         click.echo(f"  aws secretsmanager get-secret-value \\")
         click.echo(f"    --region {region} \\")
-        click.echo(f"    --secret-id {secret_id} \\")
+        click.echo(f"    --secret-id \"{secret_name}\" \\")
         click.echo(f"    --query SecretString \\")
-        click.echo(f"    --output text")
+        click.echo(f"    --output text | jq -r '.LITELLM_MASTER_KEY'")
         click.echo("\nOr copy it directly to clipboard (macOS):")
         click.echo(f"  aws secretsmanager get-secret-value \\")
         click.echo(f"    --region {region} \\")
-        click.echo(f"    --secret-id {secret_id} \\")
+        click.echo(f"    --secret-id \"{secret_name}\" \\")
         click.echo(f"    --query SecretString \\")
-        click.echo(f"    --output text | pbcopy")
+        click.echo(f"    --output text | jq -r '.LITELLM_MASTER_KEY' | pbcopy")
         click.echo("\nThen:")
         click.echo(f"  1. Open {base_url}/ui in your browser")
         click.echo(f"  2. Login with the master key (starts with 'sk-')")

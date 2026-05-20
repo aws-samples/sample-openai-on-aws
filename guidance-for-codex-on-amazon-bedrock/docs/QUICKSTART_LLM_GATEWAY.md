@@ -82,6 +82,13 @@ uv run cxwb init
 #   - JWT Audience? → (optional, your client ID)
 #   - JWT Issuer? → (optional, your IdP URL)
 #
+# - Enable OpenTelemetry monitoring? → Yes (Recommended)
+# - Monitoring mode? → 
+#     • Local collectors only (Default - no ECS needed)
+#     • Central collector only (Server-side only)
+#     • Hybrid
+#     • None (Disable monitoring)
+#
 # - LiteLLM master key? → (auto-generated)
 # - Database password? → (auto-generated)
 # - Allowed CIDR? → 10.0.0.0/8 (corporate network)
@@ -102,24 +109,39 @@ uv run cxwb build --profile <profile-name>
 # - Updates profile with image URIs
 
 # 5. Deploy infrastructure
-uv run cxwb deploy --profile  <profile-name>
+uv run cxwb deploy --profile <profile-name>
 
-# This deploys stacks in order:
-# 1. codex-networking (VPC, subnets, NAT gateway)
-# 2. codex-user-key-mapping (DynamoDB table - if OIDC enabled)
-# 3. codex-litellm-gateway (ECS Fargate + ALB + LiteLLM + JWT middleware)
+# This deploys stacks in order (based on monitoring mode):
+# 1. codex-otel-networking (VPC, subnets, NAT gateway)
+# 2. codex-otel-collector (OpenTelemetry collector - if Central or Hybrid mode)
+# 3. codex-user-key-mapping (DynamoDB table - if OIDC enabled)
+# 4. codex-litellm-gateway (ECS Fargate + ALB + LiteLLM + JWT middleware)
 
 # Wait 10-15 minutes for deployment
 # Outputs:
 # - GatewayEndpoint = http://<alb-url>/v1
 # - If OIDC enabled: Self-service portal at http://<alb-url>/api/my-key
+# - If Central/Hybrid mode: CollectorEndpoint = http://<otel-alb-url>
 
-# 6. Generate developer bundle
-# --bucket is optional; if omitted, bundle is saved locally only.
-# The bucket is created automatically if it doesn't exist.
-uv run cxwb distribute --profile <profile-name> --bucket <your-s3-bucket>
+# 6. Download local OTEL collector binary (ONLY if Local or Hybrid mode)
+# IMPORTANT: This step packages the binary into the developer bundle
+# Developers do NOT need to download this separately - it comes in the bundle
+cd ../deployment/scripts
+./build-local-collector.sh --platform darwin-arm64
+# Downloads ~15MB binary to ../binaries/ (excluded from git via .gitignore)
+# Supports: darwin-arm64, darwin-amd64, linux-amd64, windows-amd64
 
-# Output: S3 presigned URL (or local zip path if --bucket omitted)
+# 7. Generate developer bundle
+# This command packages everything including the binary from step 6
+cd ../../source
+uv run cxwb distribute --profile <profile-name> --bucket my-bucket
+
+# Output: S3 presigned URL for developers to download
+# Bundle includes:
+#   • Gateway config (config.toml)
+#   • OTEL collector binary (packaged from step 6 if Local/Hybrid mode)
+#   • Collector config + management scripts
+#   • install.sh (installs everything on developer machine)
 ```
 
 **Bundle contents:**
@@ -268,6 +290,427 @@ curl -X POST "http://<gateway-url>/v1/chat/completions" \
 - `401 Unauthorized` → Check API key is set correctly: `echo $OPENAI_API_KEY`
 - `Connection refused` → Check gateway URL is correct
 - `Invalid model` → Gateway doesn't have model mapped (check litellm_config.yaml)
+
+---
+
+## Monitoring Options
+
+This guidance supports **OpenTelemetry monitoring** with CloudWatch for usage tracking and cost attribution.
+
+### Three Monitoring Modes
+
+| Mode | Client Metrics | Server Metrics | Infrastructure | Monthly Cost | Best For |
+|------|----------------|----------------|----------------|--------------|----------|
+| **Local Only** | ✅ Yes | ❌ No | None | ~$10 | Small teams, quick start |
+| **Central Only** | ❌ No | ✅ Yes | ECS + ALB | ~$31 | Server visibility only |
+| **Hybrid** | ✅ Yes | ✅ Yes | ECS + ALB | ~$41 | Production (recommended) |
+
+#### Local Collectors Only (Default)
+
+**What you get:**
+- Client-side metrics: E2E latency, tool usage, turn duration
+- Lightweight binary (~15MB) runs on each developer machine
+- Uses AWS SSO credentials (no infrastructure needed)
+- CloudWatch dashboard for visualization
+
+**Developer experience:**
+```bash
+# Automatically installed via install.sh
+~/.codex/otel/start-collector.sh  # Start in background
+~/.codex/otel/stop-collector.sh   # Stop collector
+~/.codex/otel/collector-status.sh # Check status, memory usage
+tail -f ~/.codex/otel/otelcol.log # View logs
+```
+
+**Metrics collected:**
+- `codex.turn.duration_ms` - E2E latency per turn
+- `codex.turn.token_usage` - Tokens by type (input, output, cached)
+- `codex.api_request` - API calls, status codes
+- Dimensions: user.email, model, session_source
+
+#### Central Collector Only
+
+**What you get:**
+- Server-side metrics: API costs, token usage, gateway health
+- ECS Fargate collector (0.5 vCPU, 1GB RAM)
+- Cannot be disabled by developers
+- Full audit trail in CloudWatch
+
+**Metrics collected:**
+- `gen_ai.client.operation.duration` - Request latency
+- `gen_ai.client.token.usage` - Token usage from LiteLLM
+- `litellm.request_total_cost_usd` - Request costs in USD
+- Dimensions: OTelLib, gen_ai.operation.name
+
+#### Hybrid (Recommended for Production)
+
+**What you get:**
+- **Complete visibility**: Client + Server metrics combined
+- **Single dashboard**: Unified view of all metrics
+- **User attribution**: Track costs per user/team/department
+- **Best for**: Production deployments requiring full observability
+
+### Configuration During Wizard
+
+During `cxwb init`, you'll be prompted:
+```
+? Enable OpenTelemetry monitoring? Yes
+? Monitoring mode:
+  ❯ Local collectors only - Client metrics, no ECS (Default)
+    Central collector only - Server metrics from gateway
+    Hybrid (local + central) - Complete visibility (Recommended for prod)
+    None - Disable monitoring
+```
+
+**Recommendation:**
+- **Quick start / Evaluation:** Choose "Local collectors only"
+- **Production deployment:** Choose "Hybrid"
+- **Server-only visibility:** Choose "Central collector only"
+
+---
+
+## Testing OTEL Monitoring
+
+### Test 1: Local Collector (if Local or Hybrid mode)
+
+```bash
+# Step 1: Verify local collector is installed
+ls -lh ~/.codex/otel/
+# Expected files:
+# - otelcol-local (~15MB binary)
+# - otel-config.yaml
+# - start-collector.sh
+# - stop-collector.sh
+# - collector-status.sh
+
+# Step 2: Start the collector
+~/.codex/otel/start-collector.sh
+# Expected output:
+# Starting OTEL collector...
+# ✓ OTEL collector started (PID 12345)
+#   Sending metrics to: CloudWatch (region: us-west-2)
+#   Logs: /Users/you/.codex/otel/otelcol.log
+
+# Step 3: Check status
+~/.codex/otel/collector-status.sh
+# Expected output:
+# ✓ Collector running
+#   PID: 12345
+#   Started: Thu May 14 10:45:00 2026
+#   Memory: ~45MB
+#   Region: us-west-2
+#   User: your-email@example.com
+
+# Step 4: Send test metric
+curl -X POST http://localhost:4318/v1/metrics \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resourceMetrics": [{
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "codex-test"}},
+          {"key": "user.email", "value": {"stringValue": "test@example.com"}}
+        ]
+      },
+      "scopeMetrics": [{
+        "metrics": [{
+          "name": "codex.test.counter",
+          "unit": "1",
+          "sum": {
+            "dataPoints": [{
+              "asInt": "42",
+              "timeUnixNano": "'$(date +%s)000000000'"
+            }],
+            "aggregationTemporality": 2,
+            "isMonotonic": true
+          }
+        }]
+      }]
+    }]
+  }'
+# Expected: HTTP 200 OK (or empty = success)
+
+# Step 5: Verify in CloudWatch (wait 1-2 minutes)
+aws cloudwatch list-metrics \
+  --namespace "codex-test" \
+  --region us-west-2
+
+# Expected output:
+# {
+#   "Metrics": [
+#     {
+#       "Namespace": "codex-test",
+#       "MetricName": "codex.test.counter",
+#       ...
+#     }
+#   ]
+# }
+
+# Or check via console:
+# https://console.aws.amazon.com/cloudwatch/home?region=us-west-2#metricsV2:
+
+# Step 6: Check collector logs (troubleshooting)
+tail -f ~/.codex/otel/otelcol.log
+# Look for:
+# ✓ "Everything is ready. Begin running and processing data."
+# ✓ "Exporting metrics" messages
+# ✗ NO "SignatureDoesNotMatch" errors
+# ✗ NO "AccessDenied" errors
+```
+
+**✅ Local Collector Success Criteria:**
+- [ ] Collector starts without errors (PID shown)
+- [ ] Status shows running with ~30-50MB memory
+- [ ] Test metric returns HTTP 200
+- [ ] Metric appears in CloudWatch within 2 minutes
+- [ ] No authentication errors in logs
+- [ ] Collector stops cleanly with `stop-collector.sh`
+
+### Test 2: Run Real Codex Session (Client Metrics)
+
+```bash
+# Ensure local collector is running
+~/.codex/otel/collector-status.sh
+
+# Run Codex command
+codex-gateway exec "What is 2+2? Answer in one word."
+
+# Wait 1-2 minutes, then check CloudWatch metrics
+aws cloudwatch list-metrics \
+  --namespace "Codex" \
+  --region us-west-2
+
+# Expected metrics:
+# - codex.turn.duration_ms
+# - codex.turn.token_usage
+# - codex.api_request
+```
+
+### Test 3: Central Collector (if Central or Hybrid mode)
+
+```bash
+# Step 1: Verify ECS collector is running
+aws ecs describe-services \
+  --cluster codex-gateway-otel-collector-cluster \
+  --services codex-gateway-otel-collector-service \
+  --region us-west-2 \
+  --query 'services[0].{desired:desiredCount,running:runningCount,status:status}'
+
+# Expected:
+# {
+#   "desired": 1,
+#   "running": 1,
+#   "status": "ACTIVE"
+# }
+
+# Step 2: Get collector endpoint
+COLLECTOR_ENDPOINT=$(aws cloudformation describe-stacks \
+  --stack-name codex-gateway-otel-collector \
+  --region us-west-2 \
+  --query 'Stacks[0].Outputs[?OutputKey==`CollectorEndpoint`].OutputValue' \
+  --output text)
+
+echo "Collector endpoint: $COLLECTOR_ENDPOINT"
+
+# Step 3: Test collector health
+curl ${COLLECTOR_ENDPOINT}/
+# Expected: HTTP 200 or 404 (ALB is responding)
+
+# Step 4: Send test metric
+curl -X POST "${COLLECTOR_ENDPOINT}/v1/metrics" \
+  -H "Content-Type: application/json" \
+  -H "x-user-email: test@example.com" \
+  -H "x-user-id: testuser" \
+  -d '{
+    "resourceMetrics": [{
+      "resource": {
+        "attributes": [
+          {"key": "service.name", "value": {"stringValue": "codex-gateway-test"}}
+        ]
+      },
+      "scopeMetrics": [{
+        "metrics": [{
+          "name": "codex.gateway.test.counter",
+          "sum": {
+            "dataPoints": [{
+              "asInt": "100",
+              "timeUnixNano": "'$(date +%s)000000000'"
+            }],
+            "aggregationTemporality": 2,
+            "isMonotonic": true
+          }
+        }]
+      }]
+    }]
+  }'
+
+# Expected: HTTP 200 OK
+
+# Step 5: Verify in CloudWatch (wait 1-2 minutes)
+aws cloudwatch list-metrics \
+  --namespace "codex-gateway-test" \
+  --region us-west-2
+
+# Step 6: Check ECS collector logs
+aws logs tail /ecs/codex-gateway-otel-collector-collector \
+  --follow \
+  --region us-west-2
+# Press Ctrl+C to stop
+
+# Look for:
+# ✓ "Everything is ready. Begin running and processing data."
+# ✓ Receiver endpoints: 0.0.0.0:4317, 0.0.0.0:4318
+# ✓ "Exporting metrics" messages
+# ✗ NO authentication errors
+```
+
+**✅ Central Collector Success Criteria:**
+- [ ] ECS service shows desired=1, running=1
+- [ ] Collector endpoint responds to health check
+- [ ] Test metric returns HTTP 200
+- [ ] Metric appears in CloudWatch within 2 minutes
+- [ ] User attribution headers extracted (x-user-email, x-user-id)
+- [ ] No errors in ECS logs
+
+### Test 4: Gateway Metrics (Server-Side)
+
+```bash
+# If Central or Hybrid mode, LiteLLM gateway sends metrics automatically
+
+# Run a Codex command
+codex-gateway exec "What is 2+2?"
+
+# Wait 1-2 minutes, then check for gateway metrics
+aws cloudwatch list-metrics \
+  --namespace "Codex" \
+  --region us-west-2 \
+  --metric-name "litellm.request.total"
+
+# Or query with PromQL (in CloudWatch console):
+# sum({__name__="litellm.request.total"})
+```
+
+### Test 5: View Unified Dashboard (Hybrid mode)
+
+```bash
+# Query client-side metrics
+# PromQL: sum({__name__="codex.turn.duration_ms", source="client"})
+
+# Query server-side metrics
+# PromQL: sum({__name__="litellm.request.total", source="server"})
+
+# Query by user
+# PromQL: sum by (user_email) ({__name__=~"codex.*token.*"})
+
+# Query cost by department (if headers propagated)
+# PromQL: sum by (department) ({__name__=~".*token.*"})
+
+# Open CloudWatch console:
+open "https://console.aws.amazon.com/cloudwatch/home?region=us-west-2#prometheus:query"
+```
+
+### Troubleshooting OTEL
+
+#### Issue: Local collector won't start
+
+**Symptom:** `start-collector.sh` fails or no PID shown
+
+**Debug:**
+```bash
+# Check if port 4318 is available
+lsof -i :4318
+# If occupied, kill process: kill <PID>
+
+# Check AWS credentials
+aws sts get-caller-identity
+# If expired: aws sso login --profile your-profile
+
+# Check collector logs
+tail -100 ~/.codex/otel/otelcol.log
+# Look for error messages
+
+# Test manually
+cd ~/.codex/otel
+./otelcol-local --config otel-config.yaml
+# Press Ctrl+C to stop
+```
+
+#### Issue: Metrics not appearing in CloudWatch
+
+**Checklist:**
+1. Wait 1-2 minutes (metrics take time to propagate)
+2. Check collector is running: `ps aux | grep otelcol`
+3. Verify no authentication errors in logs
+4. Confirm region matches: `us-west-2`
+5. Check namespace is correct (service.name becomes namespace)
+
+**Debug:**
+```bash
+# Check collector health
+curl http://localhost:13133/
+# Expected: HTTP 200
+
+# Check CloudWatch endpoint is reachable
+curl -v https://monitoring.us-west-2.amazonaws.com/
+# Expected: HTTP 403 (endpoint exists, but needs auth)
+
+# Verify IAM permissions
+aws iam get-user --query 'User.Arn'
+# Check your user/role has: monitoring:PutMetricData
+```
+
+#### Issue: ECS collector not starting
+
+**Symptom:** ECS service shows desired=1, running=0
+
+**Debug:**
+```bash
+# List tasks
+TASK_ARN=$(aws ecs list-tasks \
+  --cluster codex-gateway-otel-collector-cluster \
+  --region us-west-2 \
+  --query 'taskArns[0]' \
+  --output text)
+
+# Describe task to see failure reason
+aws ecs describe-tasks \
+  --cluster codex-gateway-otel-collector-cluster \
+  --tasks $TASK_ARN \
+  --region us-west-2 \
+  --query 'tasks[0].{stopCode:stopCode,stopReason:stopReason,containers:containers[*].{name:name,reason:reason}}'
+
+# Common issues:
+# 1. SSM parameter not found → check OTelConfig exists
+# 2. IAM permission denied → check TaskRole has monitoring:PutMetricData
+# 3. ALB health check failing → check security groups allow ALB → Task
+```
+
+#### Issue: User attribution not working
+
+**Symptom:** Metrics appear but no user.email dimension
+
+**Fix for Local Collector:**
+```bash
+# Check config has user email
+grep user.email ~/.codex/otel/otel-config.yaml
+# Should show: value: "your-email@example.com"
+
+# If placeholder, edit file:
+sed -i '' 's/__USER_EMAIL__/your-email@example.com/g' ~/.codex/otel/otel-config.yaml
+
+# Restart collector
+~/.codex/otel/stop-collector.sh
+~/.codex/otel/start-collector.sh
+```
+
+**Fix for Central Collector:**
+```bash
+# Check LiteLLM is sending user headers
+# Look for x-user-email, x-user-id in request logs
+
+# If missing, verify JWT middleware is extracting claims correctly
+aws logs tail /ecs/litellm --follow --region us-west-2 --filter-pattern "jwt-middleware"
+```
 
 ---
 
@@ -519,11 +962,178 @@ curl -X POST "$GATEWAY_URL/model/new" \
 
 ---
 
-## Telemetry
+## Monitoring Architecture Details
 
-LiteLLM has built-in support for spend tracking, request logging, and OTel/Prometheus callbacks. Configure them in `litellm_config.yaml` — see the [LiteLLM observability docs](https://docs.litellm.ai/docs/observability) for the supported sinks (CloudWatch, Prometheus, Langfuse, Datadog, custom OTel collectors).
+### Local Collector Components
 
-If you bring your own gateway (Portkey, Kong AI Gateway, Helicone, etc.), use that gateway's native telemetry instead.
+```
+~/.codex/otel/
+├── otelcol-local              # Binary (~15MB)
+├── otel-config.yaml           # Configuration
+├── start-collector.sh         # Start script
+├── stop-collector.sh          # Stop script
+├── collector-status.sh        # Status check
+├── otelcol.log                # Logs (created at runtime)
+└── otelcol.pid                # Process ID (created at runtime)
+```
+
+**Configuration highlights:**
+- **Receiver:** OTLP/HTTP on 127.0.0.1:4318 (localhost only)
+- **Processor:** Adds user.email, user.id, source=client
+- **Exporter:** Native OTLP to `https://monitoring.{region}.amazonaws.com`
+- **Auth:** SigV4 using AWS SSO credentials
+- **Health check:** HTTP endpoint on 127.0.0.1:13133
+
+### ECS Collector Components
+
+**CloudFormation Stack:** `{profile}-otel-collector`
+
+```
+Infrastructure:
+├── ALB (internet-facing)
+│   ├── HTTP listener (port 80) → redirect to HTTPS
+│   └── HTTPS listener (port 443) → forward to tasks
+├── Target Group (OTLP HTTP on port 4318)
+├── ECS Service
+│   ├── Cluster: {profile}-otel-collector-cluster
+│   ├── Task: 1x Fargate (0.5 vCPU, 1GB RAM)
+│   └── Image: aws-otel-collector:latest
+├── SSM Parameter: {profile}-otel-collector-config
+│   ├── Receiver: OTLP/HTTP on 0.0.0.0:4318
+│   ├── Processor: Extracts x-user-email headers
+│   ├── Exporter: Native OTLP to CloudWatch
+│   └── Auth: SigV4 using ECS TaskRole
+└── IAM Roles
+    ├── TaskExecutionRole: ECR pull, SSM read, CloudWatch Logs
+    └── TaskRole: cloudwatch:PutMetricData, monitoring:PutMetricData
+```
+
+### Metrics Reference
+
+#### Client-Side Metrics (Local Collector)
+
+| Metric | Type | Description | Dimensions |
+|--------|------|-------------|------------|
+| `codex.turn.duration_ms` | Histogram | E2E latency per turn | user.email, model, session_source |
+| `codex.turn.token_usage` | Counter | Tokens by type | token_type, user.email, model |
+| `codex.api_request` | Counter | API calls | status, user.email |
+
+**Resource attributes:**
+- `source=client` (client-side)
+- `collector.type=local`
+- `user.email`, `user.id`
+
+#### Server-Side Metrics (Central Collector)
+
+| Metric | Type | Description | Dimensions |
+|--------|------|-------------|------------|
+| `litellm.request.total` | Counter | Total API requests | user.email, department, endpoint, status |
+| `litellm.bedrock.tokens` | Counter | Bedrock token usage | token_type, model, user.email |
+| `litellm.request.duration` | Histogram | Gateway latency | endpoint, status |
+
+**Resource attributes:**
+- `source=server` (server-side)
+- `aws.account_id`
+- `user.email`, `department`, `team.id` (from headers)
+
+### PromQL Query Examples
+
+```promql
+# Total tokens by user (all sources)
+sum by (user_email) ({__name__=~".*token.*"})
+
+# API requests by status code
+sum by (status) ({__name__="codex.api_request"})
+
+# Average turn duration by user
+avg by (user_email) ({__name__="codex.turn.duration_ms"})
+
+# Client vs Server latency comparison
+avg({__name__="codex.turn.duration_ms", source="client"})
+  - avg({__name__="litellm.request.duration", source="server"})
+
+# Token usage by department
+sum by (department) ({__name__=~".*token.*"})
+
+# Error rate by user
+sum by (user_email) ({__name__=~".*request.*", status=~"4..|5.."})
+  / sum by (user_email) ({__name__=~".*request.*"})
+```
+
+### Cost Tracking
+
+**Local Collector (per developer):**
+- Binary download: $0 (one-time)
+- Collector process: $0 (uses local CPU/memory)
+- CloudWatch metrics: ~$0.30/month (1000 metrics/day × $0.01 per 1000)
+- Network egress: ~$0.10/month (compressed OTLP)
+- **Total per developer:** ~$0.40/month
+
+**ECS Central Collector:**
+- ECS Fargate: $14.40/month (0.5 vCPU + 1GB RAM, 24×7)
+- ALB: $16.20/month ($0.0225/hr base)
+- CloudWatch metrics: ~$0.30/month
+- CloudWatch Logs: $0.50/month (7-day retention)
+- **Total:** ~$31/month
+
+**Hybrid (both):**
+- Local collectors (50 devs): $20/month
+- ECS collector: $31/month
+- **Total for 50 developers:** ~$51/month (~$1/dev)
+
+### IAM Permissions Required
+
+**For Developers (Local Collector):**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "monitoring:PutMetricData",
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+**For ECS Collector (TaskRole):**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricData",
+        "monitoring:PutMetricData"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+### Manual OTEL Collector Binary Download
+
+If you prefer to download the binary manually or need a specific version:
+
+```bash
+# From repo root
+cd guidance-for-codex-on-amazon-bedrock/deployment/scripts
+
+# Download for your platform
+./build-local-collector.sh --platform darwin-arm64
+# Options: darwin-arm64, darwin-amd64, linux-amd64, windows-amd64
+
+# Download specific version
+ADOT_VERSION=v0.40.0 ./build-local-collector.sh --platform darwin-arm64
+
+# Download all platforms
+./build-local-collector.sh --all
+
+# Binary saved to: ../binaries/otelcol-local-<platform>
+```
 
 ---
 
