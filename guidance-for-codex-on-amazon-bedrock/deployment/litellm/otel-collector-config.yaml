@@ -45,32 +45,21 @@ processors:
         action: insert
 
 exporters:
-  # Local testing — stdout
+  # Debug exporter for troubleshooting
   debug:
-    verbosity: basic
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
 
-  # Production — CloudWatch EMF
-  # Matches the dimension structure of the existing codex-test-dashboard stack.
+  # CloudWatch EMF (AWS OTEL Collector v0.47 doesn't support native OTLP)
   awsemf:
+    region: ${AWS_REGION}
     namespace: LiteLLMGateway
-    log_group_name: /aws/litellm/metrics
+    log_group_name: /aws/codex/metrics
     dimension_rollup_option: "ZeroAndSingleDimensionRollup"
-    region: us-east-1
     output_destination: cloudwatch
-    log_retention: 30
     resource_to_telemetry_conversion:
       enabled: true
-    metric_declarations:
-      - dimensions: [[OTelLib]]
-        metric_name_selectors: [".*"]
-      - dimensions: [[user.email, OTelLib]]
-        metric_name_selectors: [".*"]
-      - dimensions: [[user.id, OTelLib]]
-        metric_name_selectors: [".*"]
-      - dimensions: [[model, OTelLib]]
-        metric_name_selectors: [".*"]
-      - dimensions: [[team.id, OTelLib]]
-        metric_name_selectors: [".*"]
 
 service:
   extensions: [health_check]
@@ -83,5 +72,4 @@ service:
     metrics:
       receivers: [otlp]
       processors: [attributes, resource, batch/metrics]
-      # Switch to [awsemf] for production deployment
-      exporters: [debug]
+      exporters: [debug, awsemf]

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Stop local OTEL collector
+
+set -euo pipefail
+
+COLLECTOR_DIR="$HOME/.codex/otel"
+COLLECTOR_PID="$COLLECTOR_DIR/otelcol.pid"
+
+if [[ ! -f "$COLLECTOR_PID" ]]; then
+  echo "✓ Collector not running (no PID file)"
+  exit 0
+fi
+
+PID=$(cat "$COLLECTOR_PID")
+
+if ! kill -0 "$PID" 2>/dev/null; then
+  echo "✓ Collector not running (stale PID file)"
+  rm -f "$COLLECTOR_PID"
+  exit 0
+fi
+
+echo "Stopping OTEL collector (PID $PID)..."
+
+kill "$PID" 2>/dev/null || true
+
+# Wait for graceful shutdown
+for i in {1..5}; do
+  if ! kill -0 "$PID" 2>/dev/null; then
+    rm -f "$COLLECTOR_PID"
+    echo "✓ Collector stopped"
+    exit 0
+  fi
+  sleep 1
+done
+
+# Force kill if still running
+if kill -0 "$PID" 2>/dev/null; then
+  echo "Force stopping..."
+  kill -9 "$PID" 2>/dev/null || true
+  sleep 1
+fi
+
+rm -f "$COLLECTOR_PID"
+echo "✓ Collector stopped"

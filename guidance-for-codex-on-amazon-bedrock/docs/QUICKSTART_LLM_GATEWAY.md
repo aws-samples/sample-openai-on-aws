@@ -82,6 +82,13 @@ uv run cxwb init
 #   - JWT Audience? → (optional, your client ID)
 #   - JWT Issuer? → (optional, your IdP URL)
 #
+# - Enable OpenTelemetry monitoring? → Yes (Recommended)
+# - Monitoring mode? → 
+#     • Local collectors only (Default - no ECS needed)
+#     • Central collector only (Server-side only)
+#     • Hybrid
+#     • None (Disable monitoring)
+#
 # - LiteLLM master key? → (auto-generated)
 # - Database password? → (auto-generated)
 # - Allowed CIDR? → 10.0.0.0/8 (corporate network)
@@ -102,24 +109,39 @@ uv run cxwb build --profile <profile-name>
 # - Updates profile with image URIs
 
 # 5. Deploy infrastructure
-uv run cxwb deploy --profile  <profile-name>
+uv run cxwb deploy --profile <profile-name>
 
-# This deploys stacks in order:
-# 1. codex-networking (VPC, subnets, NAT gateway)
-# 2. codex-user-key-mapping (DynamoDB table - if OIDC enabled)
-# 3. codex-litellm-gateway (ECS Fargate + ALB + LiteLLM + JWT middleware)
+# This deploys stacks in order (based on monitoring mode):
+# 1. codex-otel-networking (VPC, subnets, NAT gateway)
+# 2. codex-otel-collector (OpenTelemetry collector - if Central or Hybrid mode)
+# 3. codex-user-key-mapping (DynamoDB table - if OIDC enabled)
+# 4. codex-litellm-gateway (ECS Fargate + ALB + LiteLLM + JWT middleware)
 
 # Wait 10-15 minutes for deployment
 # Outputs:
 # - GatewayEndpoint = http://<alb-url>/v1
 # - If OIDC enabled: Self-service portal at http://<alb-url>/api/my-key
+# - If Central/Hybrid mode: CollectorEndpoint = http://<otel-alb-url>
 
-# 6. Generate developer bundle
-# --bucket is optional; if omitted, bundle is saved locally only.
-# The bucket is created automatically if it doesn't exist.
-uv run cxwb distribute --profile <profile-name> --bucket <your-s3-bucket>
+# 6. Download local OTEL collector binary (ONLY if Local or Hybrid mode)
+# IMPORTANT: This step packages the binary into the developer bundle
+# Developers do NOT need to download this separately - it comes in the bundle
+cd ../deployment/scripts
+./build-local-collector.sh --platform darwin-arm64
+# Downloads ~15MB binary to ../binaries/ (excluded from git via .gitignore)
+# Supports: darwin-arm64, darwin-amd64, linux-amd64, windows-amd64
 
-# Output: S3 presigned URL (or local zip path if --bucket omitted)
+# 7. Generate developer bundle
+# This command packages everything including the binary from step 6
+cd ../../source
+uv run cxwb distribute --profile <profile-name> --bucket my-bucket
+
+# Output: S3 presigned URL for developers to download
+# Bundle includes:
+#   • Gateway config (config.toml)
+#   • OTEL collector binary (packaged from step 6 if Local/Hybrid mode)
+#   • Collector config + management scripts
+#   • install.sh (installs everything on developer machine)
 ```
 
 **Bundle contents:**
@@ -161,6 +183,8 @@ cd <profile-name>-config/
 # - Configure ~/.codex/config.toml with the key
 # - Add codex-gateway alias to your shell profile
 # - Remove any conflicting OpenAI authentication
+# - Install OTEL collector files to ~/.codex/otel/ (if Local/Hybrid mode)
+# - Auto-start the OTEL collector in the background (if monitoring enabled)
 
 # 4. Reload your shell
 source ~/.zshrc  # macOS
@@ -271,6 +295,130 @@ curl -X POST "http://<gateway-url>/v1/chat/completions" \
 
 ---
 
+## Monitoring Options
+
+This guidance supports **OpenTelemetry monitoring** with CloudWatch for usage tracking and cost attribution.
+
+### Three Monitoring Modes
+
+| Mode | Client Metrics | Server Metrics | Infrastructure | Best For |
+|------|----------------|----------------|----------------|----------|
+| **Local Only** | ⚠️ Partial* | ❌ No | None | Small teams (limited support) |
+| **Central Only** | ❌ No | ✅ Yes | ECS + ALB | Production (recommended) |
+| **Hybrid** | ⚠️ Partial* | ✅ Yes | ECS + ALB | Server + client (limited) |
+
+*Note: Codex CLI v0.130.0 does not support OTEL exports. Local collector infrastructure is in place but client metrics are not sent.
+
+#### Local Collectors Only (Default)
+
+**What you get:**
+- Client-side metrics: E2E latency, tool usage, turn duration
+- Lightweight binary (~15MB) runs on each developer machine
+- Uses AWS SSO credentials (no infrastructure needed)
+- CloudWatch dashboard for visualization
+
+**Developer experience:**
+```bash
+# Collector auto-started by install.sh. Management scripts available:
+~/.codex/otel/collector-status.sh # Check if running, view status
+~/.codex/otel/stop-collector.sh   # Stop collector
+~/.codex/otel/start-collector.sh  # Restart if stopped
+tail -f ~/.codex/otel/otelcol.log # View logs
+```
+
+**Metrics collected:**
+- `codex.turn.duration_ms` - E2E latency per turn
+- `codex.turn.token_usage` - Tokens by type (input, output, cached)
+- `codex.api_request` - API calls, status codes
+- Dimensions: user.email, model, session_source
+
+#### Central Collector Only
+
+**What you get:**
+- Server-side metrics: API costs, token usage, gateway health
+- ECS Fargate collector (0.5 vCPU, 1GB RAM)
+- Cannot be disabled by developers
+- Full audit trail in CloudWatch
+
+**Metrics collected:**
+- `gen_ai.client.operation.duration` - Request latency
+- `gen_ai.client.token.usage` - Token usage from LiteLLM
+- `litellm.request_total_cost_usd` - Request costs in USD
+- Dimensions: OTelLib, gen_ai.operation.name
+
+#### Hybrid (Limited Support)
+
+**What you get:**
+- **Server-side metrics**: Working (LiteLLM → Central Collector → CloudWatch)
+- **Client-side metrics**: ⚠️ Not supported (Codex CLI v0.130.0 lacks OTEL export)
+- **Local collector**: Installed but unused
+- **Best for**: Testing only - use Central Only for production
+
+### Configuration During Wizard
+
+During `cxwb init`, you'll be prompted:
+```
+? Enable OpenTelemetry monitoring? Yes
+? Monitoring mode:
+  ❯ Local collectors only - Client metrics, no ECS (Default)
+    Central collector only - Server metrics from gateway
+    Hybrid (local + central) - Complete visibility (Recommended for prod)
+    None - Disable monitoring
+```
+
+**Recommendation:**
+- **Production deployment:** Choose "Central collector only" (server-side metrics only)
+- **Testing/Development:** Choose "Hybrid" (note: client metrics not working)
+- **Opt-out:** Choose "None" to disable monitoring
+
+---
+
+## Testing OTEL Monitoring
+
+### Verify Central Collector (Central or Hybrid mode)
+
+⚠️ **Note on Local Collector:** If you selected Local or Hybrid mode, the local collector is installed but **Codex CLI v0.130.0 does not export OTEL metrics**. Only server-side (central collector) metrics will work.
+
+```bash
+# Step 1: Make a test request with Codex CLI
+codex exec 'Say hello in one word'
+# This sends metrics: LiteLLM → Central Collector → CloudWatch
+
+# Step 2: Wait 30 seconds for metrics to appear, then check CloudWatch
+aws cloudwatch list-metrics \
+  --namespace Codex \
+  --region us-east-1 \
+  --query 'Metrics[0:5].[MetricName]' \
+  --output table
+
+# Expected metrics:
+# - gen_ai.client.operation.duration (latency)
+# - gen_ai.client.token.usage (token consumption)
+# - gen_ai.client.token.cost (cost in USD)
+
+# Step 3: View dashboard
+# Get dashboard URL from stack outputs
+aws cloudformation describe-stacks \
+  --stack-name <your-gateway-stack>-dashboard \
+  --region us-east-1 \
+  --query 'Stacks[0].Outputs[?OutputKey==`DashboardURL`].OutputValue' \
+  --output text
+
+# Open URL in browser - you should see:
+# - Request latency graph
+# - Request count
+# - Token usage
+# - Cost tracking
+```
+
+**✅ Success Criteria:**
+- [ ] Codex request completes successfully
+- [ ] Metrics appear in `Codex` namespace within 1 minute
+- [ ] Dashboard shows data (graphs populated)
+- [ ] User attribution visible (check EMF logs for `metadata.user_api_key_user_id`)
+
+---
+
 ### Getting API Key - Two Options
 
 Choose based on your organization's needs:
@@ -333,113 +481,6 @@ source ~/.bashrc # Linux
 **Setup:** Enable OIDC during `cxwb init`, build JWT middleware with `cxwb build-jwt`, then deploy.
 
 See the [complete guide](OIDC_SELF_SERVICE_SETUP.md) for detailed setup steps, troubleshooting, and monitoring.
-
----
-
-## What is codex-gateway?
-
-**`codex-gateway` is an alias created by `install.sh` — it's a shortcut for calling Codex CLI with the right flags.**
-
-```bash
-# The alias looks like this:
-alias codex-gateway='codex -c model_provider="litellm-gateway" -c model="openai.gpt-5.4"'
-
-# Without the alias, you'd have to type:
-codex -c 'model_provider="litellm-gateway"' -c 'model="openai.gpt-5.4"' exec "your prompt"
-
-# With the alias, you just type:
-codex-gateway exec "your prompt"
-```
-
-**What the alias does:**
-1. Uses custom provider "litellm-gateway" (from `~/.codex/config.toml`)
-2. Uses model "openai.gpt-5.4" (or whatever model was set during `cxwb init`)
-3. Sends requests to: `http://<gateway-url>/v1`
-4. Includes Authorization header with your API key
-
-**Where it's created:** The `install.sh` script adds the alias to your shell profile (`~/.zshrc` or `~/.bashrc`), so it's available in all new terminal sessions after you run `source ~/.zshrc` (or restart your shell).
-
----
-
-## Validation
-
-### Test Gateway Health
-
-```bash
-# 1. Check gateway is responding
-curl "$GATEWAY_URL/health"
-
-# Expected: {"status":"healthy"}
-
-# 2. Test OpenAI compatibility
-curl "$GATEWAY_URL/v1/models" \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY"
-
-# Expected: List of configured models
-
-# 3. Test Bedrock integration
-curl "$GATEWAY_URL/v1/chat/completions" \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "openai.gpt-5.4",
-    "messages": [{"role": "user", "content": "Hello"}],
-    "max_tokens": 10
-  }'
-
-# Expected: JSON response with completion
-```
-
-### Test Quota Enforcement
-
-```bash
-# 1. Create test key with low budget
-curl -X POST "$GATEWAY_URL/key/generate" \
-  -H "Authorization: Bearer $LITELLM_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "key_alias": "test-quota",
-    "models": ["openai.gpt-5.4"],
-    "max_budget": 0.10,
-    "budget_duration": "1d"
-  }'
-
-# Save the returned key: TEST_KEY=sk-litellm-test-...
-
-# 2. Make multiple requests until quota exceeded
-for i in {1..20}; do
-  curl "$GATEWAY_URL/v1/chat/completions" \
-    -H "Authorization: Bearer $TEST_KEY" \
-    -H "Content-Type: application/json" \
-    -d '{
-      "model": "openai.gpt-5.4",
-      "messages": [{"role": "user", "content": "Test '$i'"}],
-      "max_tokens": 100
-    }'
-  sleep 1
-done
-
-# Expected: Eventually returns 429 Too Many Requests
-# {"error": {"message": "Budget exceeded for key test-quota"}}
-```
-
-### Test Codex Integration
-
-```bash
-# 1. Check Codex config
-cat ~/.codex/config.toml | grep -A5 "model_provider"
-
-# Expected:
-# model_provider = "openai"
-# model = "openai.gpt-5.4"
-# [openai]
-# base_url = "https://<gateway-url>/v1"
-
-# 2. Test Codex prompt
-echo "Create a hello world function in Python" | codex
-
-# Expected: Codex generates code via gateway
-```
 
 ---
 
@@ -516,14 +557,6 @@ curl -X POST "$GATEWAY_URL/model/new" \
     }
   }'
 ```
-
----
-
-## Telemetry
-
-LiteLLM has built-in support for spend tracking, request logging, and OTel/Prometheus callbacks. Configure them in `litellm_config.yaml` — see the [LiteLLM observability docs](https://docs.litellm.ai/docs/observability) for the supported sinks (CloudWatch, Prometheus, Langfuse, Datadog, custom OTel collectors).
-
-If you bring your own gateway (Portkey, Kong AI Gateway, Helicone, etc.), use that gateway's native telemetry instead.
 
 ---
 
@@ -690,6 +723,107 @@ curl https://<gateway-url>/api/my-key \
   -v
 
 # If JWT is valid but key creation fails, check LiteLLM master key in Secrets Manager
+```
+
+### Issue 11: Local OTEL Collector Won't Start
+
+**Symptom:** `start-collector.sh` fails or no PID shown
+
+**Debug:**
+```bash
+# Check if port 4318 is available
+lsof -i :4318
+# If occupied, kill process: kill <PID>
+
+# Check AWS credentials
+aws sts get-caller-identity
+# If expired: aws sso login --profile your-profile
+
+# Check collector logs
+tail -100 ~/.codex/otel/otelcol.log
+# Look for error messages
+
+# Test manually
+cd ~/.codex/otel
+./otelcol-local --config otel-config.yaml
+# Press Ctrl+C to stop
+```
+
+### Issue 12: OTEL Metrics Not Appearing in CloudWatch
+
+**Checklist:**
+1. Wait 1-2 minutes (metrics take time to propagate)
+2. Check collector is running: `ps aux | grep otelcol`
+3. Verify no authentication errors in logs
+4. Confirm region matches: `us-west-2`
+5. Check namespace is correct (service.name becomes namespace)
+
+**Debug:**
+```bash
+# Check collector health
+curl http://localhost:13133/
+# Expected: HTTP 200
+
+# Check CloudWatch endpoint is reachable
+curl -v https://monitoring.us-west-2.amazonaws.com/
+# Expected: HTTP 403 (endpoint exists, but needs auth)
+
+# Verify IAM permissions
+aws iam get-user --query 'User.Arn'
+# Check your user/role has: monitoring:PutMetricData
+```
+
+### Issue 13: ECS OTEL Collector Not Starting
+
+**Symptom:** ECS service shows desired=1, running=0
+
+**Debug:**
+```bash
+# List tasks
+TASK_ARN=$(aws ecs list-tasks \
+  --cluster codex-gateway-otel-collector-cluster \
+  --region us-west-2 \
+  --query 'taskArns[0]' \
+  --output text)
+
+# Describe task to see failure reason
+aws ecs describe-tasks \
+  --cluster codex-gateway-otel-collector-cluster \
+  --tasks $TASK_ARN \
+  --region us-west-2 \
+  --query 'tasks[0].{stopCode:stopCode,stopReason:stopReason,containers:containers[*].{name:name,reason:reason}}'
+
+# Common issues:
+# 1. SSM parameter not found → check OTelConfig exists
+# 2. IAM permission denied → check TaskRole has monitoring:PutMetricData
+# 3. ALB health check failing → check security groups allow ALB → Task
+```
+
+### Issue 14: OTEL User Attribution Not Working
+
+**Symptom:** Metrics appear but no user.email dimension
+
+**Fix for Local Collector:**
+```bash
+# Check config has user email
+grep user.email ~/.codex/otel/otel-config.yaml
+# Should show: value: "your-email@example.com"
+
+# If placeholder, edit file:
+sed -i '' 's/__USER_EMAIL__/your-email@example.com/g' ~/.codex/otel/otel-config.yaml
+
+# Restart collector
+~/.codex/otel/stop-collector.sh
+~/.codex/otel/start-collector.sh
+```
+
+**Fix for Central Collector:**
+```bash
+# Check LiteLLM is sending user headers
+# Look for x-user-email, x-user-id in request logs
+
+# If missing, verify JWT middleware is extracting claims correctly
+aws logs tail /ecs/litellm --follow --region us-west-2 --filter-pattern "jwt-middleware"
 ```
 
 ### General Debugging Tips

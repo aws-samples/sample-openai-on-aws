@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import platform
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import boto3
@@ -98,6 +100,37 @@ def check_docker_buildx() -> bool:
         stderr=subprocess.DEVNULL,
     )
     return result.returncode == 0
+
+
+def prepare_build_context_with_otel(enable_otel: bool) -> Path:
+    """Prepare build context with OTEL callbacks enabled/disabled.
+
+    Creates a temporary directory with modified litellm_config.yaml if OTEL is enabled.
+    Returns path to build context (temp dir or original LITELLM_DIR).
+    """
+    if not enable_otel:
+        # Use original config as-is
+        return LITELLM_DIR
+
+    # Create temp directory for modified build context
+    temp_dir = Path(tempfile.mkdtemp(prefix="cxwb-build-"))
+
+    # Copy Dockerfile and litellm_config.yaml to temp dir
+    shutil.copy(DOCKERFILE, temp_dir / "Dockerfile")
+
+    # Read original config and uncomment callbacks line
+    config_content = LITELLM_CONFIG.read_text()
+    modified_config = config_content.replace(
+        '  # callbacks: ["otel"]',
+        '  callbacks: ["otel"]'
+    )
+
+    # Write modified config to temp dir
+    (temp_dir / "litellm_config.yaml").write_text(modified_config)
+
+    click.echo(f"  OTEL callbacks: enabled (callbacks: ['otel'] uncommented)")
+
+    return temp_dir
 
 
 def build_and_push_image(
@@ -276,6 +309,10 @@ def run(profile_name: str, multi_arch: bool = True) -> None:
     ecr_repo_name = prof.get("ecr_repo_name", "codex-litellm-gateway")
     litellm_version = prof.get("litellm_version", LITELLM_RECOMMENDED_VERSION)
 
+    # Check if OTEL monitoring is enabled
+    monitoring = prof.get("monitoring", {})
+    enable_otel = monitoring.get("enabled") and monitoring.get("mode") in ["central", "hybrid"]
+
     click.echo(f"\n🔨 Building LiteLLM image for profile: {profile_name}")
     click.echo(f"  Region: {region}")
     click.echo(f"  ECR repository: {ecr_repo_name}")
@@ -288,16 +325,24 @@ def run(profile_name: str, multi_arch: bool = True) -> None:
     # Login to ECR
     ecr_login(region)
 
-    # Build and push image
-    image_uri = build_and_push_image(region, repo_uri, litellm_version, LITELLM_DIR, multi_arch)
+    # Prepare build context with OTEL config modifications
+    build_context = prepare_build_context_with_otel(enable_otel)
 
-    # Update profile with image_uri
-    prof["image_uri"] = image_uri
-    profile.save(profile_name, prof)
+    try:
+        # Build and push image
+        image_uri = build_and_push_image(region, repo_uri, litellm_version, build_context, multi_arch)
 
-    click.echo(f"\n✓ Build complete. Profile updated with image_uri.")
-    if multi_arch:
-        click.echo(f"\n📦 Multi-arch image supports both:")
-        click.echo(f"  • x86_64 (amd64) - ECS Fargate default")
-        click.echo(f"  • ARM64 (arm64) - Graviton instances")
-    click.echo(f"\nNext: cxwb deploy --profile {profile_name}")
+        # Update profile with image_uri
+        prof["image_uri"] = image_uri
+        profile.save(profile_name, prof)
+
+        click.echo(f"\n✓ Build complete. Profile updated with image_uri.")
+        if multi_arch:
+            click.echo(f"\n📦 Multi-arch image supports both:")
+            click.echo(f"  • x86_64 (amd64) - ECS Fargate default")
+            click.echo(f"  • ARM64 (arm64) - Graviton instances")
+        click.echo(f"\nNext: cxwb deploy --profile {profile_name}")
+    finally:
+        # Clean up temp directory if we created one
+        if build_context != LITELLM_DIR and build_context.exists():
+            shutil.rmtree(build_context)

@@ -55,6 +55,23 @@ def _deploy_gateway(p: dict) -> None:
         capabilities=["CAPABILITY_IAM"],
     )
 
+    # Deploy OTel collector (if Central or Hybrid mode)
+    monitoring = p.get("monitoring", {})
+    monitoring_mode = monitoring.get("mode", "none")
+    if monitoring_mode in ["central", "hybrid"]:
+        click.echo("\nDeploying OTel collector stack...")
+        net_outputs = aws.stack_outputs(region, p["networking_stack"])
+        aws.deploy_stack(
+            region=region,
+            name=p["otel_stack"],
+            template=paths.OTEL_TEMPLATE,
+            parameters={
+                "VpcId": net_outputs["VpcId"],
+                "SubnetIds": net_outputs["SubnetIds"],
+            },
+            capabilities=["CAPABILITY_IAM"],
+        )
+
     # Deploy DynamoDB table for JWT middleware (if OIDC enabled)
     if p.get("enable_oidc"):
         click.echo("\nDeploying DynamoDB table for user-key mapping...")
@@ -73,13 +90,17 @@ def _deploy_gateway(p: dict) -> None:
     # Build parameters for gateway stack
     gateway_params = {
         "NetworkingStackName": p["networking_stack"],
-        "EnableOtel": "false",
+        "EnableOtel": "true" if monitoring_mode in ["central", "hybrid"] else "false",
         "AwsRegion": region,
         "LiteLLMImage": p["image_uri"],
         "LiteLLMMasterKey": p["master_key"],
         "DBPassword": p["db_password"],
         "AllowedCidr": p["allowed_cidr"],
     }
+
+    # Add OTel stack name if enabled
+    if monitoring_mode in ["central", "hybrid"]:
+        gateway_params["OtelStackName"] = p["otel_stack"]
 
     # Add JWT middleware parameters if OIDC enabled
     if p.get("enable_oidc"):
@@ -117,6 +138,22 @@ def _deploy_gateway(p: dict) -> None:
         click.echo("\n✅ OIDC enabled - developers can self-generate keys at:")
         gateway_url = outputs.get("GatewayEndpoint", "").rstrip("/v1")
         click.echo(f"  {gateway_url}/api/my-key")
+
+    # Deploy LiteLLM dashboard
+    click.echo("\nDeploying CloudWatch dashboard...")
+    dashboard_name = "LiteLLMGateway"
+    aws.deploy_stack(
+        region=region,
+        name=f"{p['gateway_stack']}-dashboard",
+        template=paths.LITELLM_DASHBOARD_TEMPLATE,
+        parameters={
+            "DashboardName": dashboard_name,
+            "MetricsNamespace": "Codex",  # Match OTEL collector namespace
+        },
+        capabilities=[],
+    )
+    click.echo(f"\n✅ Dashboard deployed: {dashboard_name}")
+    click.echo(f"   View at: https://console.aws.amazon.com/cloudwatch/home?region={region}#dashboards:name={dashboard_name}")
 
 
 def run(profile_name: str) -> None:

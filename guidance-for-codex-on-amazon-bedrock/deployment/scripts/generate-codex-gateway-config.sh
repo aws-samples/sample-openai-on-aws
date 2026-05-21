@@ -15,6 +15,9 @@ Optional:
   --key-mint-url URL      Self-service key endpoint (e.g. https://gw/sso/key/generate)
   --model ID              Default model alias (default: openai.gpt-5.4)
   --profile-name NAME     Codex profile name (default: codex-gateway)
+  --enable-local-otel     Enable local OTEL collector configuration
+  --aws-region REGION     AWS region for OTEL (required if --enable-local-otel)
+  --user-email EMAIL      User email for attribution (required if --enable-local-otel)
   --outdir DIR            Output directory (default: ./codex-gateway-config)
 USAGE
 }
@@ -24,6 +27,9 @@ KEY_MINT_URL=""
 MODEL="openai.gpt-5.4"
 PROFILE_NAME="codex-gateway"
 OUTDIR="./codex-gateway-config"
+ENABLE_LOCAL_OTEL="false"
+AWS_REGION=""
+USER_EMAIL=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -31,6 +37,9 @@ while [[ $# -gt 0 ]]; do
     --key-mint-url) KEY_MINT_URL="$2"; shift 2 ;;
     --model) MODEL="$2"; shift 2 ;;
     --profile-name) PROFILE_NAME="$2"; shift 2 ;;
+    --enable-local-otel) ENABLE_LOCAL_OTEL="true"; shift ;;
+    --aws-region) AWS_REGION="$2"; shift 2 ;;
+    --user-email) USER_EMAIL="$2"; shift 2 ;;
     --outdir) OUTDIR="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown flag: $1" >&2; usage; exit 2 ;;
@@ -41,6 +50,13 @@ if [[ -z "$GATEWAY_URL" ]]; then
   echo "missing required flag: --gateway-url" >&2
   usage
   exit 2
+fi
+
+if [[ "$ENABLE_LOCAL_OTEL" == "true" ]]; then
+  if [[ -z "$AWS_REGION" ]] || [[ -z "$USER_EMAIL" ]]; then
+    echo "error: --enable-local-otel requires --aws-region and --user-email" >&2
+    exit 2
+  fi
 fi
 
 mkdir -p "$OUTDIR"
@@ -67,6 +83,22 @@ api_key = "env:OPENAI_API_KEY"
 http_headers = { Authorization = "Bearer YOUR_API_KEY_HERE" }
 # >>> end codex-gateway managed <<<
 TOML
+
+# Add OTEL configuration if enabled
+if [[ "$ENABLE_LOCAL_OTEL" == "true" ]]; then
+  cat >>"$OUTDIR/config.toml.fragment" <<TOML
+
+# >>> codex-otel managed: do not edit inside fences <<<
+# OpenTelemetry configuration for local metrics collection
+[otel]
+environment = "prod"
+exporter = { otlp-http = {
+  endpoint = "http://localhost:4318/v1/metrics",
+  protocol = "binary"
+}}
+# >>> end codex-otel managed <<<
+TOML
+fi
 
 cat >"$OUTDIR/install.sh" <<'INSTALL'
 #!/usr/bin/env bash
@@ -105,8 +137,8 @@ if grep -q "YOUR_API_KEY_HERE" "$fragment"; then
   echo ""
 fi
 
-# Strip any prior managed block, then append.
-awk '/# >>> end codex-gateway managed/{skip=0; next} /# >>> codex-gateway managed/{skip=1} !skip{print}' "$cfg" >"$cfg.tmp"
+# Strip any prior managed blocks (both codex-gateway and codex-otel), then append.
+awk '/# >>> end (codex-gateway|codex-otel) managed/{skip=0; next} /# >>> (codex-gateway|codex-otel) managed/{skip=1} !skip{print}' "$cfg" >"$cfg.tmp"
 mv "$cfg.tmp" "$cfg"
 # Ensure trailing newline so the next awk pass can match the fence on its own line.
 [[ -s "$cfg" && $(tail -c1 "$cfg") != "" ]] && printf '\n' >>"$cfg"
@@ -118,6 +150,33 @@ echo "✓ Wrote configuration to $cfg"
 if [[ -f "$HOME/.codex/auth.json" ]]; then
   mv "$HOME/.codex/auth.json" "$HOME/.codex/auth.json.backup.$(date +%s)"
   echo "✓ Backed up existing auth.json (was pointing to api.openai.com)"
+fi
+
+# Install OTEL collector if present
+if [[ -f "$here/otelcol-local" ]]; then
+  echo ""
+  echo "Installing OTEL collector..."
+  mkdir -p "$HOME/.codex/otel"
+
+  cp "$here/otelcol-local" "$HOME/.codex/otel/"
+  cp "$here/otel-config.yaml" "$HOME/.codex/otel/"
+  cp "$here/start-collector.sh" "$HOME/.codex/otel/"
+  cp "$here/stop-collector.sh" "$HOME/.codex/otel/"
+  cp "$here/collector-status.sh" "$HOME/.codex/otel/"
+
+  chmod +x "$HOME/.codex/otel/otelcol-local"
+  chmod +x "$HOME/.codex/otel"/*.sh
+
+  # Remove quarantine on macOS
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    xattr -d com.apple.quarantine "$HOME/.codex/otel/otelcol-local" 2>/dev/null || true
+  fi
+
+  echo "✓ OTEL collector installed to ~/.codex/otel/"
+
+  # Start collector
+  "$HOME/.codex/otel/start-collector.sh"
+  echo "✓ OTEL collector started"
 fi
 
 # Detect shell and add alias
@@ -150,6 +209,9 @@ echo ""
 echo "Next steps:"
 echo "  1. Reload your shell: source $SHELL_RC"
 echo "  2. Test Codex CLI: codex-gateway exec 'Say hello'"
+if [[ -f "$here/otelcol-local" ]]; then
+  echo "  3. Check OTEL: ~/.codex/otel/collector-status.sh"
+fi
 echo ""
 echo "See README.md for detailed usage and troubleshooting."
 echo "════════════════════════════════════════════════════════════"

@@ -34,7 +34,7 @@ def _confirm(prompt: str, default: bool = False) -> bool:
 
 
 def _idc_common() -> dict:
-    data = {
+    common = {
         "start_url": _text(
             "IdC start URL (e.g. https://d-xxxxxxxxxx.awsapps.com/start):",
             validate=lambda v: v.startswith("https://") or "must start with https://",
@@ -54,11 +54,19 @@ def _idc_common() -> dict:
             default="codex",
         ),
     }
-    if _confirm("Send Codex telemetry to an OTel endpoint?", default=False):
-        data["otel_endpoint"] = _text("OTel endpoint URL:", default="")
+
+    # Monitoring configuration for IdC
+    click.echo("\n📊 Monitoring Configuration")
+    monitoring = _prompt_monitoring()
+    common["monitoring"] = monitoring
+
+    # Legacy otel_endpoint for backwards compatibility
+    if monitoring.get("enabled") and monitoring.get("mode") in ["central", "hybrid"]:
+        common["otel_endpoint"] = ""  # Will be populated after deploy
     else:
-        data["otel_endpoint"] = ""
-    return data
+        common["otel_endpoint"] = ""
+
+    return common
 
 
 def _idc_flow() -> dict:
@@ -101,6 +109,64 @@ def _existing_gateway_flow() -> dict:
         "region": _select(
             "AWS region for S3 bundle uploads:", BEDROCK_REGIONS, default="us-west-2"
         ),
+    }
+
+
+def _prompt_monitoring() -> dict:
+    """Prompt for monitoring configuration."""
+    enable_monitoring = _confirm("Enable OpenTelemetry monitoring?", default=True)
+
+    if not enable_monitoring:
+        return {"enabled": False, "mode": "none"}
+
+    mode = _select(
+        "Monitoring mode:",
+        choices=[
+            "Local collectors only - Client-side metrics, no ECS infrastructure",
+            "Central collector only - Server-side metrics from gateway",
+            "Hybrid (local + central collectors) - Complete visibility",
+            "None - Disable monitoring",
+        ],
+        default="Local collectors only - Client-side metrics, no ECS infrastructure",
+    )
+
+    # Parse mode from choice
+    if "Hybrid" in mode:
+        monitoring_mode = "hybrid"
+        click.echo("\nℹ  Complete observability: client + server metrics")
+        click.echo("ℹ  Requires central ECS collector deployment")
+    elif "Central collector only" in mode:
+        monitoring_mode = "central"
+        click.echo("\nℹ  Server-side visibility: gateway metrics, quotas, rate limits")
+        click.echo("ℹ  Requires central ECS collector deployment")
+        click.echo("⚠  No client-side metrics (E2E latency, local tools)")
+    elif "Local collectors only" in mode:
+        monitoring_mode = "local"
+        click.echo("\nℹ  Client-side metrics: E2E latency, local operations")
+        click.echo("ℹ  No ECS infrastructure required")
+        click.echo("⚠  No server-side visibility (quotas, rate limits, gateway health)")
+        click.echo("⚠  Developers can disable their collectors")
+        if not _confirm("Continue with local-only mode?", default=False):
+            return _prompt_monitoring()  # Re-prompt
+    else:
+        monitoring_mode = "none"
+        return {"enabled": False, "mode": "none"}
+
+    # Ask about analytics if central/hybrid
+    analytics_enabled = False
+    if monitoring_mode in ["central", "hybrid"]:
+        analytics_enabled = _confirm(
+            "Enable analytics pipeline? (EMF logs → Firehose → S3 → Athena)",
+            default=False
+        )
+
+    dashboard_name = _text("Dashboard name:", default="CodexDashboard")
+
+    return {
+        "enabled": True,
+        "mode": monitoring_mode,
+        "analytics_enabled": analytics_enabled,
+        "dashboard_name": dashboard_name,
     }
 
 
@@ -221,6 +287,17 @@ def _gateway_flow() -> dict:
     else:
         data["master_key"] = _text("LiteLLM master key (sk-...):")
         data["db_password"] = _text("RDS master password:")
+
+    # Monitoring configuration
+    click.echo("\n📊 Monitoring Configuration")
+    data["monitoring"] = _prompt_monitoring()
+
+    # Add OTel stack name if Central or Hybrid mode
+    if data["monitoring"].get("enabled") and data["monitoring"].get("mode") in ["central", "hybrid"]:
+        data["otel_stack"] = _text(
+            "OTel collector stack name:", default="codex-otel-collector"
+        )
+
     return data
 
 
