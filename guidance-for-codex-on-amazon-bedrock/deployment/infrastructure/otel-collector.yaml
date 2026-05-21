@@ -17,7 +17,7 @@ Parameters:
 
   MetricsNamespace:
     Type: String
-    Default: Codex
+    Default: LiteLLMGateway
     Description: CloudWatch metrics namespace
 
   CustomDomainName:
@@ -329,7 +329,6 @@ Resources:
               - Effect: Allow
                 Action:
                   - cloudwatch:PutMetricData
-                  - monitoring:PutMetricData
                 Resource: '*'
               # EMF exporter needs CloudWatch Logs permissions
               - Effect: Allow

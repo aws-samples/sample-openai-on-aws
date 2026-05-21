@@ -119,38 +119,41 @@ def _prompt_monitoring() -> dict:
     if not enable_monitoring:
         return {"enabled": False, "mode": "none"}
 
-    mode = _select(
-        "Monitoring mode:",
-        choices=[
-            "Local collectors only - Client-side metrics, no ECS infrastructure",
-            "Central collector only - Server-side metrics from gateway",
-            "Hybrid (local + central collectors) - Complete visibility",
-            "None - Disable monitoring",
-        ],
-        default="Local collectors only - Client-side metrics, no ECS infrastructure",
-    )
+    while True:
+        mode = _select(
+            "Monitoring mode:",
+            choices=[
+                "Local collectors only - Client-side metrics, no ECS infrastructure",
+                "Central collector only - Server-side metrics from gateway",
+                "Hybrid (local + central collectors) - Complete visibility",
+                "None - Disable monitoring",
+            ],
+            default="Local collectors only - Client-side metrics, no ECS infrastructure",
+        )
 
-    # Parse mode from choice
-    if "Hybrid" in mode:
-        monitoring_mode = "hybrid"
-        click.echo("\nℹ  Complete observability: client + server metrics")
-        click.echo("ℹ  Requires central ECS collector deployment")
-    elif "Central collector only" in mode:
-        monitoring_mode = "central"
-        click.echo("\nℹ  Server-side visibility: gateway metrics, quotas, rate limits")
-        click.echo("ℹ  Requires central ECS collector deployment")
-        click.echo("⚠  No client-side metrics (E2E latency, local tools)")
-    elif "Local collectors only" in mode:
-        monitoring_mode = "local"
-        click.echo("\nℹ  Client-side metrics: E2E latency, local operations")
-        click.echo("ℹ  No ECS infrastructure required")
-        click.echo("⚠  No server-side visibility (quotas, rate limits, gateway health)")
-        click.echo("⚠  Developers can disable their collectors")
-        if not _confirm("Continue with local-only mode?", default=False):
-            return _prompt_monitoring()  # Re-prompt
-    else:
-        monitoring_mode = "none"
-        return {"enabled": False, "mode": "none"}
+        # Parse mode from choice
+        if "Hybrid" in mode:
+            monitoring_mode = "hybrid"
+            click.echo("\nℹ  Complete observability: client + server metrics")
+            click.echo("ℹ  Requires central ECS collector deployment")
+            break
+        elif "Central collector only" in mode:
+            monitoring_mode = "central"
+            click.echo("\nℹ  Server-side visibility: gateway metrics, quotas, rate limits")
+            click.echo("ℹ  Requires central ECS collector deployment")
+            click.echo("⚠  No client-side metrics (E2E latency, local tools)")
+            break
+        elif "Local collectors only" in mode:
+            monitoring_mode = "local"
+            click.echo("\nℹ  Client-side metrics: E2E latency, local operations")
+            click.echo("ℹ  No ECS infrastructure required")
+            click.echo("⚠  No server-side visibility (quotas, rate limits, gateway health)")
+            click.echo("⚠  Developers can disable their collectors")
+            if _confirm("Continue with local-only mode?", default=False):
+                break
+        else:
+            # User explicitly chose "None" — treat as disabled, exit without prompting further
+            return {"enabled": False, "mode": "none"}
 
     # Ask about analytics if central/hybrid
     analytics_enabled = False
