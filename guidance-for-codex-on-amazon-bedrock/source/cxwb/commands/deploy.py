@@ -58,6 +58,7 @@ def _deploy_gateway(p: dict) -> None:
     # Deploy OTel collector (if Central or Hybrid mode)
     monitoring = p.get("monitoring", {})
     monitoring_mode = monitoring.get("mode", "none")
+    metrics_namespace = "LiteLLMGateway"
     if monitoring_mode in ["central", "hybrid"]:
         click.echo("\nDeploying OTel collector stack...")
         net_outputs = aws.stack_outputs(region, p["networking_stack"])
@@ -68,6 +69,7 @@ def _deploy_gateway(p: dict) -> None:
             parameters={
                 "VpcId": net_outputs["VpcId"],
                 "SubnetIds": net_outputs["SubnetIds"],
+                "MetricsNamespace": metrics_namespace,
             },
             capabilities=["CAPABILITY_IAM"],
         )
@@ -139,21 +141,21 @@ def _deploy_gateway(p: dict) -> None:
         gateway_url = outputs.get("GatewayEndpoint", "").rstrip("/v1")
         click.echo(f"  {gateway_url}/api/my-key")
 
-    # Deploy LiteLLM dashboard
-    click.echo("\nDeploying CloudWatch dashboard...")
-    dashboard_name = "LiteLLMGateway"
-    aws.deploy_stack(
-        region=region,
-        name=f"{p['gateway_stack']}-dashboard",
-        template=paths.LITELLM_DASHBOARD_TEMPLATE,
-        parameters={
-            "DashboardName": dashboard_name,
-            "MetricsNamespace": "Codex",  # Match OTEL collector namespace
-        },
-        capabilities=[],
-    )
-    click.echo(f"\n✅ Dashboard deployed: {dashboard_name}")
-    click.echo(f"   View at: https://console.aws.amazon.com/cloudwatch/home?region={region}#dashboards:name={dashboard_name}")
+    if monitoring_mode in ["central", "hybrid"]:
+        click.echo("\nDeploying CloudWatch dashboard...")
+        dashboard_name = monitoring.get("dashboard_name", "LiteLLMGateway")
+        aws.deploy_stack(
+            region=region,
+            name=f"{p['gateway_stack']}-dashboard",
+            template=paths.LITELLM_DASHBOARD_TEMPLATE,
+            parameters={
+                "DashboardName": dashboard_name,
+                "MetricsNamespace": metrics_namespace,
+            },
+            capabilities=[],
+        )
+        click.echo(f"\n✅ Dashboard deployed: {dashboard_name}")
+        click.echo(f"   View at: https://console.aws.amazon.com/cloudwatch/home?region={region}#dashboards:name={dashboard_name}")
 
 
 def run(profile_name: str) -> None:
