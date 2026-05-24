@@ -45,92 +45,109 @@ set in the next step.
 
 ### 4. Create the `CodexBedrockUser` permission set
 
-Replace `<idc-instance-arn>`, `<account-id>`, `<group-id>`, and the policy name
-with your values. Session duration defaults to 8 hours; raise it up to 12 hours (`PT12H`)
-for long Codex sessions.
+Replace `<account-id>` and `<group-id>` with your values. Session duration defaults to
+8 hours; raise it up to 12 hours (`PT12H`) for long Codex sessions.
 
 ```bash
-IDC_ARN=arn:aws:sso:::instance/ssoins-xxxxxxxxxxxxxxxx
+# Discover your IdC instance ARN and Identity Store ID
+IDC_ARN=$(aws sso-admin list-instances --region us-east-1 \
+  --query 'Instances[0].InstanceArn' --output text)
+IDENTITY_STORE_ID=$(aws sso-admin list-instances --region us-east-1 \
+  --query 'Instances[0].IdentityStoreId' --output text)
+
 ACCOUNT_ID=123456789012
-GROUP_ID=<idc-group-id-for-codex-users>
-POLICY_NAME=CodexBedrockPolicy   # from bedrock-auth-idc.yaml output
+POLICY_NAME=CodexBedrockInvokePolicy   # matches PolicyName parameter from bedrock-auth-idc.yaml
+
+# Look up your Codex developer group ID
+GROUP_ID=$(aws identitystore list-groups \
+  --identity-store-id "$IDENTITY_STORE_ID" \
+  --filters AttributePath=DisplayName,AttributeValue=<YourCodexGroup> \
+  --region us-east-1 \
+  --query 'Groups[0].GroupId' --output text)
 
 # Create the permission set
 PS_ARN=$(aws sso-admin create-permission-set \
   --instance-arn "$IDC_ARN" \
   --name CodexBedrockUser \
   --session-duration PT8H \
+  --region us-east-1 \
   --query 'PermissionSet.PermissionSetArn' --output text)
 
 # Attach the customer-managed policy from step 3
 aws sso-admin attach-customer-managed-policy-reference-to-permission-set \
   --instance-arn "$IDC_ARN" \
   --permission-set-arn "$PS_ARN" \
-  --customer-managed-policy-reference "Name=$POLICY_NAME,Path=/"
+  --customer-managed-policy-reference "Name=$POLICY_NAME,Path=/" \
+  --region us-east-1
 
 # Assign the permission set to the Codex user group in the target account
 aws sso-admin create-account-assignment \
   --instance-arn "$IDC_ARN" \
   --permission-set-arn "$PS_ARN" \
   --principal-type GROUP --principal-id "$GROUP_ID" \
-  --target-type AWS_ACCOUNT --target-id "$ACCOUNT_ID"
+  --target-type AWS_ACCOUNT --target-id "$ACCOUNT_ID" \
+  --region us-east-1
+
+# Wait ~15 seconds for the assignment to propagate before testing credentials
+sleep 15
 ```
 
 Console equivalent: IAM Identity Center → Permission sets → Create, then
 attach the customer-managed policy by name and assign to the group in each
 target account.
 
-### 5. Generate and distribute the developer bundle
+### 5. Distribute the developer configuration
 
-```bash
-deployment/scripts/generate-codex-sso-config.sh \
-  --start-url https://d-xxxxxxxxxx.awsapps.com/start \
-  --sso-region us-east-1 \
-  --account-id 123456789012 \
-  --permission-set CodexBedrockUser \
-  --bedrock-region us-west-2 \
-  --profile-name codex \
-  --model openai.gpt-5.4 \
-  --otel-endpoint https://otel.your-org.example/v1/metrics \
-  --outdir ./dist/codex-sso
+Each developer needs two snippets — an AWS CLI profile that uses SSO, and a
+Codex `config.toml` that points at Amazon Bedrock. Share these directly (email,
+chat, internal wiki) or package them and upload to S3 with a presigned URL.
+
+**AWS CLI profile** — append to `~/.aws/config`:
+
+```ini
+[sso-session codex]
+sso_start_url = https://d-xxxxxxxxxx.awsapps.com/start
+sso_region = us-east-1
+sso_registration_scopes = sso:account:access
+
+[profile codex]
+sso_session = codex
+sso_account_id = 123456789012
+sso_role_name = CodexBedrockUser
+region = us-west-2
 ```
 
-`--otel-endpoint` is optional; omit it if you are not running the OTel stack.
-The bundle is self-contained — zip `./dist/codex-sso/` and distribute it through
-whatever channel your organization already uses (MDM, internal package repository, shared
-drive, etc.).
+**Codex configuration** — append to `~/.codex/config.toml`:
 
-#### Optional: presigned S3 URL distribution
+```toml
+model_provider = "amazon-bedrock"
+model = "openai.gpt-5.4"
 
-For organizations without an MDM or package-repository solution, S3 presigned URLs
-are a low-cost alternative. Upload the zipped bundle to a private S3 bucket and share a
-time-limited URL:
+[model_providers.amazon-bedrock]
+name = "Amazon Bedrock"
 
-```bash
-( cd dist && zip -r codex-sso.zip codex-sso )
-aws s3 cp dist/codex-sso.zip s3://<your-bundle-bucket>/codex-sso.zip
-aws s3 presign s3://<your-bundle-bucket>/codex-sso.zip --expires-in 604800
+[model_providers.amazon-bedrock.aws]
+region = "us-west-2"
+profile = "codex"
 ```
 
-Share the URL via Slack, email, or ticket. Rotate by re-running the generator
-and re-uploading — previous URLs expire automatically. Keep the bucket private;
-the presigned URL is the only grant. Suitable for small teams; for larger
-rollouts, prefer MDM.
+For advanced Codex configuration (model parameters, sandbox modes, custom
+providers), see the
+[OpenAI Codex configuration reference](https://developers.openai.com/codex/config-advanced).
+
+**Distribution:** Share the two snippets above via email, Slack, your internal wiki, or existing onboarding automation (MDM, internal CLI tools, etc.). Organizations that need packaged bundles can zip the snippets and distribute via S3 presigned URLs or internal package repositories.
 
 ## End-user flow
 
-Documented in the bundle's `DEV-SETUP.md`. The short version:
-
 ```bash
-./install.sh           # writes fenced managed blocks to ~/.aws/config and ~/.codex/config.toml
+# Append the AWS profile snippet to ~/.aws/config and the [model_providers...]
+# block to ~/.codex/config.toml as shown above.
 aws sso login --profile codex
 codex                  # AWS_PROFILE is resolved via the [model_providers.amazon-bedrock.aws] block
 ```
 
-The `codex-sso-creds` helper (installed to `~/.local/bin`) is configured as the
-profile's `credential_process`. It automatically launches `aws sso login` when the
-cached SSO token is missing or expired, so users see a browser prompt once per
-working day and nothing more.
+`aws sso login` opens a browser for IdC sign-in and caches an 8-hour token.
+Codex picks up the SSO credentials through the standard AWS SDK credential chain.
 
 ### Headless / remote hosts (no local browser)
 
@@ -146,10 +163,9 @@ aws sso login --profile codex --no-browser
 # returns once the cache is populated.
 ```
 
-The bundled helper automatically launches plain `aws sso login` on a cache miss and will
-fail on headless hosts. Pre-warm with `--no-browser` before starting Codex;
-re-run when the 8-hour token expires. Fully non-interactive fleet/CI pre-warming is
-not yet supported.
+Pre-warm the cache with `--no-browser` before starting Codex; re-run when the
+8-hour token expires. Fully non-interactive fleet/CI pre-warming is not yet
+supported.
 
 ### `aws login` (console-login) profiles
 
@@ -158,9 +174,11 @@ profiles (`login_session`) via the standard AWS SDK credential chain.
 
 ### Uninstall
 
-`./uninstall.sh` from the bundle removes the fenced blocks from
-`~/.aws/config` and `~/.codex/config.toml`, removes the helper, and preserves
-timestamped backups.
+Remove the `[sso-session codex]` and `[profile codex]` blocks from
+`~/.aws/config`, then remove the `[model_providers.amazon-bedrock]` block (and
+optional `[otel]` block) from `~/.codex/config.toml`. Take a timestamped
+backup of each file first. To revoke any cached SSO tokens, run
+`aws sso logout --profile codex`.
 
 ## Validation
 
@@ -210,11 +228,11 @@ per model); they throttle the whole account, not individual users.
 ## Optional: OTel usage dashboard
 
 Per-user usage attribution in CloudWatch. The order is: **deploy the collector
-stack first**, then pass its ALB endpoint into `generate-codex-sso-config.sh`
-via `--otel-endpoint` so each distributed `config.toml` has an `[otel]` block
-pointing at your collector. The collector
-(`deployment/infrastructure/otel-collector.yaml`) extracts the `x-user-id`
-header stamped by `install.sh` into a CloudWatch `user.id` dimension.
+stack first**, then add an `[otel]` block to each developer's
+`~/.codex/config.toml` pointing at the collector's ALB endpoint and stamping
+the developer's SSO identity as the `x-user-id` header. The collector
+(`deployment/infrastructure/otel-collector.yaml`) extracts that header into a
+CloudWatch `user.id` dimension.
 
 ### 1. Deploy the collector stack
 
@@ -251,26 +269,42 @@ deployment/scripts/deploy-otel-stack.sh \
   --oidc-client-id <app-client-id>
 ```
 
-With JWT validation enabled, each developer also needs a bearer token — pass it
-into the generator as a static header (see `--otel-endpoint` usage in
-step 5 of Admin setup; per-user token distribution is out of scope for this
-document).
+With JWT validation enabled, each developer also needs a bearer token —
+include it as an additional static header alongside `x-user-id` in the
+`[otel.headers]` block shown below. Per-user token distribution is out of
+scope for this document.
 
-Trade-offs between the two postures are in `specs/02-otel-dashboard.md`.
+**Trade-offs:** HTTP-only (trust-on-distribution) is faster to deploy but accepts any `x-user-id` value. JWT validation (HTTPS + ALB auth) verifies tokens but requires ACM certificate and OIDC issuer configuration.
 
-### 3. Pass the endpoint into the developer bundle
+### 3. Add the OTel block to the developer config
 
-Provide the printed ALB endpoint to `generate-codex-sso-config.sh`:
+Append an `[otel]` block to each developer's `~/.codex/config.toml` pointing at
+the collector ALB endpoint printed in step 1. Stamp the developer's SSO
+identity into the `x-user-id` header so every metric carries that dimension:
 
-```bash
-deployment/scripts/generate-codex-sso-config.sh \
-  ... \
-  --otel-endpoint https://otel.codex.example.com/v1/metrics
+```toml
+[otel.exporter.otlp-http]
+endpoint = "https://otel.codex.example.com/v1/logs"
+protocol = "binary"
+[otel.exporter.otlp-http.headers]
+x-user-id = "user@company.com"   # developer's SSO identity — used for per-user attribution in CloudWatch
+
+[otel.metrics_exporter.otlp-http]
+endpoint = "https://otel.codex.example.com/v1/metrics"
+protocol = "binary"
+[otel.metrics_exporter.otlp-http.headers]
+x-user-id = "user@company.com"
+
+[otel.trace_exporter.otlp-http]
+endpoint = "https://otel.codex.example.com/v1/traces"
+protocol = "binary"
+[otel.trace_exporter.otlp-http.headers]
+x-user-id = "user@company.com"
 ```
 
-`install.sh` in the bundle resolves the end user's SSO identity at install
-time and embeds it into the `[otel]` block as a static `x-user-id` header;
-every metric carries that dimension.
+Resolve the SSO identity for a logged-in profile with
+`aws sts get-caller-identity --profile codex --query Arn` (the SSO username
+follows the final `/` of the assumed-role ARN).
 
 ## Known pitfalls
 

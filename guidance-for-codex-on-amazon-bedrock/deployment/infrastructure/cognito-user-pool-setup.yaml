@@ -489,47 +489,61 @@ Outputs:
   CodexConfiguration:
     Description: Configuration values for Codex CLI authentication
     Value: !Sub |
-      To use with Codex CLI authentication (native app):
+      Codex CLI authentication (native app) — use these values in the
+      [auth] section of your Codex config (see
+      https://developers.openai.com/codex/config-advanced):
 
-      uv run cxwb init
       - Provider Domain: ${DomainPrefix}.auth.${AWS::Region}.amazoncognito.com
-      - User Pool ID: ${UserPool}
-      - Client ID: ${UserPoolClient}
+      - User Pool ID:    ${UserPool}
+      - Client ID:       ${UserPoolClient}
+      - Issuer URL:      https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+      - Authorize URL:   https://${DomainPrefix}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize
+      - Token URL:       https://${DomainPrefix}.auth.${AWS::Region}.amazoncognito.com/oauth2/token
 
   DistributionWebClientConfiguration:
-    Description: Configuration for distribution landing page (web app) - AUTOMATED
+    Description: Configuration for distribution landing page (web app)
     Value: !Sub |
-      To use the distribution landing page with Cognito web authentication:
+      Distribution landing page with Cognito web authentication.
 
-      1. Run the init wizard:
-         uv run cxwb init
+      Detected configuration from this stack:
+        User Pool ID: ${UserPool}
+        Domain:       ${DomainPrefix}
+        Client ID:    ${DistributionWebClient}
+        Secret ARN:   (stored in Secrets Manager — see DistributionWebClientSecretArn output)
 
-      2. When prompted for distribution method:
-         - Select: "Authenticated Landing Page (IdP + ALB)"
-         - Choose: "Cognito" as IdP provider
+      1) Deploy the landing page stack with the values above:
 
-      3. Auto-detection will populate configuration:
-         ✓ User Pool ID: ${UserPool}
-         ✓ Domain: ${DomainPrefix}
-         ✓ Client ID: ${DistributionWebClient}
-         ✓ Secret ARN: (automatically retrieved from stack outputs)
+         aws cloudformation deploy \
+           --template-file deployment/infrastructure/landing-page-distribution.yaml \
+           --stack-name codex-landing-page \
+           --capabilities CAPABILITY_IAM \
+           --parameter-overrides \
+               IdPProvider=Cognito \
+               CognitoUserPoolId=${UserPool} \
+               CognitoUserPoolDomain=${DomainPrefix} \
+               CognitoClientId=${DistributionWebClient} \
+               CognitoClientSecretArn=$(aws cloudformation describe-stacks \
+                   --stack-name ${AWS::StackName} \
+                   --query "Stacks[0].Outputs[?OutputKey=='DistributionWebClientSecretArn'].OutputValue" \
+                   --output text)
 
-      4. Press Enter to accept detected values → Configuration complete!
+      2) Read the ALB DNS from the landing-page stack outputs:
 
-      5. Deploy the distribution stack:
-         uv run cxwb deploy distribution
+         aws cloudformation describe-stacks \
+           --stack-name codex-landing-page \
+           --query "Stacks[0].Outputs[?OutputKey=='DistributionURL'].OutputValue" \
+           --output text
 
-      6. After deployment, update the callback URLs:
+      3) Update the callback / logout URLs to match the ALB DNS:
+
          aws cognito-idp update-user-pool-client \
            --user-pool-id ${UserPool} \
            --client-id ${DistributionWebClient} \
            --callback-urls "https://<alb-dns-from-stack-output>/oauth2/idpresponse" \
            --logout-urls "https://<alb-dns-from-stack-output>"
 
-      Note:
-      - Client secret is automatically stored in Secrets Manager by this stack
-      - No manual copy-paste required!
-      - The callback URL comes from the landing-page stack outputs after deployment
+      Note: the client secret is auto-stored in Secrets Manager by this
+      stack; the landing-page template reads it via the secret ARN above.
 
   FederateSetupInstructions:
     Condition: UseFederate

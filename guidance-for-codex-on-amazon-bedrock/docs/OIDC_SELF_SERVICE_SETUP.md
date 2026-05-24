@@ -20,58 +20,92 @@ LiteLLM Gateway → Bedrock
 
 ---
 
-## Setup: Enable OIDC During Init
+## Setup: Enable OIDC
 
-**Step 1: Configure OIDC in Profile**
+The canonical end-to-end deployment is in
+[QUICKSTART_LLM_GATEWAY.md](QUICKSTART_LLM_GATEWAY.md). The OIDC-specific
+steps below extract the JWT middleware path. Set `AWS_REGION` and the ECR
+registry variables (`ECR_REGISTRY`, `LITELLM_IMAGE`, `JWT_IMAGE`) once at the
+top of your shell session as shown in that guide.
 
-```bash
-cd guidance-for-codex-on-amazon-bedrock/source
-uv run cxwb init
+**Step 1: Gather your IdP details**
 
-# Select: LiteLLM Gateway — deploy new
-# When asked "Enable OIDC/SSO self-service?"
-# → Choose "Yes - enable OIDC for self-service (requires IdP setup)"
+Collect the following from your corporate IdP:
 
-# Provide your IdP details:
-# - JWKS URL: https://your-tenant.okta.com/.well-known/jwks.json
-# - JWT Audience: your-client-id (optional)
-# - JWT Issuer: https://your-tenant.okta.com (optional)
-```
+| Value | Description |
+|-------|-------------|
+| JWKS URL | `https://your-tenant.okta.com/.well-known/jwks.json` |
+| JWT Audience | Client ID (optional — leave empty to skip audience validation) |
+| JWT Issuer | Issuer URL (optional — leave empty to skip issuer validation) |
 
-**Step 2: Build JWT Middleware Image**
+These map directly to the `JwksUrl`, `JwtAudience`, and `JwtIssuer` parameters
+on the `litellm-ecs.yaml` stack.
 
-```bash
-# Build and push JWT middleware Docker image to ECR
-uv run cxwb build-jwt --profile <profile-name>
-
-# This:
-# - Builds image from deployment/litellm/jwt-middleware/
-# - Creates ECR repository: codex-jwt-middleware
-# - Pushes image to ECR
-# - Updates profile with jwt_middleware_image_uri
-```
-
-**Step 3: Build LiteLLM Image (as usual)**
+**Step 2: Build and push the JWT middleware image to ECR**
 
 ```bash
-uv run cxwb build --profile <profile-name>
+export JWT_REPO=codex-jwt-middleware
+export JWT_IMAGE_TAG=v1
+export JWT_IMAGE="$ECR_REGISTRY/$JWT_REPO:$JWT_IMAGE_TAG"
+
+aws ecr create-repository \
+  --repository-name "$JWT_REPO" \
+  --region "$AWS_REGION" \
+  --image-scanning-configuration scanOnPush=true \
+  || echo "Repository already exists"
+
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  --tag "$JWT_IMAGE" \
+  --file deployment/litellm/jwt-middleware/Dockerfile \
+  --push \
+  deployment/litellm/jwt-middleware
 ```
 
-**Step 4: Deploy Infrastructure**
+**Step 3: Build and push the LiteLLM image**
+
+Follow Step 2 of [QUICKSTART_LLM_GATEWAY.md](QUICKSTART_LLM_GATEWAY.md#step-2-build-and-push-the-litellm-image)
+to build and push `$LITELLM_IMAGE`.
+
+**Step 4: Deploy the user-key-mapping DynamoDB stack**
 
 ```bash
-uv run cxwb deploy --profile <profile-name>
-
-# This deploys (in order):
-# 1. Networking stack (VPC, subnets)
-# 2. OTel collector stack
-# 3. DynamoDB table for user-key mapping
-# 4. LiteLLM gateway with JWT middleware sidecar
-#
-# Output includes:
-# GatewayEndpoint = http://<alb-url>/v1
-# Self-service portal = http://<alb-url>/api/my-key
+aws cloudformation deploy \
+  --stack-name codex-user-key-mapping \
+  --template-file deployment/litellm/ecs/user-key-mapping.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region "$AWS_REGION" \
+  --parameter-overrides TableName=codex-user-keys
 ```
+
+**Step 5: Deploy the LiteLLM gateway with JWT middleware enabled**
+
+```bash
+export GATEWAY_STACK=codex-litellm-gateway
+export LITELLM_MASTER_KEY="sk-litellm-$(openssl rand -hex 24)"
+export DB_PASSWORD="$(openssl rand -base64 24 | tr -d '/+=')"
+
+aws cloudformation deploy \
+  --stack-name "$GATEWAY_STACK" \
+  --template-file deployment/litellm/ecs/litellm-ecs.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region "$AWS_REGION" \
+  --parameter-overrides \
+      NetworkingStackName=codex-networking \
+      LiteLLMMasterKey="$LITELLM_MASTER_KEY" \
+      DBPassword="$DB_PASSWORD" \
+      AwsRegion="$AWS_REGION" \
+      LiteLLMImage="$LITELLM_IMAGE" \
+      EnableJwtMiddleware=true \
+      JwtMiddlewareImage="$JWT_IMAGE" \
+      JwksUrl="https://your-tenant.okta.com/.well-known/jwks.json" \
+      JwtAudience="your-client-id" \
+      JwtIssuer="https://your-tenant.okta.com" \
+      UserKeyMappingStackName=codex-user-key-mapping
+```
+
+The stack output `GatewayEndpoint` is your gateway base URL; the self-service
+portal is served at `<GatewayEndpoint>/api/my-key`.
 
 ---
 

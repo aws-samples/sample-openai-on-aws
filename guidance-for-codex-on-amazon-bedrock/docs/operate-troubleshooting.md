@@ -16,7 +16,7 @@ regardless of how you deployed.
 - **Fix:** verify `aws sts get-caller-identity` returns an ARN matching the
   permission-set name baked into the stack. If you renamed the permission
   set, redeploy `bedrock-auth-idc.yaml` with the new
-  `PermissionSetNamePrefix` parameter.
+  `PermissionSetNamePattern` parameter.
 
 ### Model ID returns 404 / `ResourceNotFoundException`
 - **Likely cause:** the model ID in `~/.codex/config.toml` (or gateway
@@ -39,12 +39,11 @@ regardless of how you deployed.
 ## IdC path
 
 ### `aws sso login` opens browser but Codex still fails with expired creds
-- **Likely cause:** the `credential_process` helper (`codex-sso-creds`) raced
-  the browser sign-in — Codex made its SDK call before the SSO cache was
-  populated.
-- **Fix:** re-run the Codex prompt. This is documented as expected UX in
-  `DEV-SETUP.md`. If it persists, check that `~/.aws/sso/cache/` contains a fresh
-  JSON blob with a future `expiresAt`.
+- **Likely cause:** The AWS SDK cached credentials expired before Codex could
+  use them, or the SSO session was established but credentials weren't refreshed.
+- **Fix:** Re-run the Codex prompt. If it persists, verify that `~/.aws/sso/cache/`
+  contains a fresh JSON blob with a future `expiresAt` timestamp. Run
+  `aws sts get-caller-identity --profile codex` to verify the credential chain works.
 
 ### Using `aws login` (console-login) profiles instead of `aws sso login`
 - **Requires:** Codex ≥ 0.130.0 (PR #21623 enabled the SDK's
@@ -53,14 +52,13 @@ regardless of how you deployed.
 - **Fix for older Codex:** upgrade to ≥ 0.130.0, or use an `aws sso login`
   profile.
 
-### `codex-sso-creds` works from terminal but not from the Codex desktop app / VS Code
-- **Likely cause:** GUI apps on macOS launch with a minimal PATH; the
-  helper cannot find `aws`.
-- **Fix:** the shipped helper probes Apple-Silicon + Intel Homebrew,
-  MacPorts, Linuxbrew, pip-user, and system paths, plus
-  `launchctl getenv PATH` as a fallback. If none resolve, symlink `aws`
-  into `/usr/local/bin` or add an explicit path in the helper's candidate
-  list.
+### Codex CLI works in terminal but fails in desktop app / VS Code
+- **Likely cause:** GUI apps on macOS launch with a minimal PATH and may not
+  inherit shell environment variables or AWS credential chain.
+- **Fix:** Ensure the AWS CLI is in a standard location (`/usr/local/bin/aws`
+  or Homebrew paths). For GUI apps, verify that `~/.aws/config` uses SSO
+  profiles correctly. Run `aws sts get-caller-identity --profile codex` from
+  the terminal first to confirm credentials work before launching the GUI.
 
 ---
 
@@ -78,7 +76,7 @@ regardless of how you deployed.
   Then retry the stack delete.
 
 ### Gateway `POST /v1/chat/completions` from outside the VPC times out
-- **Cause:** ALB `AllowedCidr` defaults to `10.0.0.0/16` — by design, the
+- **Cause:** ALB `AllowedCidr` defaults to `10.0.0.0/8` — by design, the
   gateway is internal-only.
 - **Fix:** either deploy a bastion or connect through the corporate VPN, or
   temporarily add a `/32` ingress rule to the ALB security group, then remove it afterward.
@@ -103,11 +101,13 @@ regardless of how you deployed.
      set of metric names than `otel-collector.yaml` declares.
   4. Wait at least 60 seconds — the batch processor flushes on an interval.
 
-### Metrics land but `user.id` dimension is empty or `$USER` placeholder
-- **Cause:** `install.sh` ran before an SSO session was cached, so it fell
-  back to `$USER` as the `x-user-id` header value.
-- **Fix:** re-run `install.sh` after a successful `aws sso login`; the
-  bundle regenerates the header from `sts:GetCallerIdentity`.
+### Metrics land but `user.id` dimension is empty or shows incorrect value
+- **Cause:** The `x-user-id` header in `~/.codex/config.toml` was not set or
+  contains a placeholder value instead of the actual SSO identity.
+- **Fix:** Update the `[otel.headers]` section in `~/.codex/config.toml` with
+  the correct user identity. Get your SSO username with:
+  `aws sts get-caller-identity --profile codex --query Arn --output text`
+  (the SSO username follows the final `/` in the assumed-role ARN).
 
 ### Collector logs show `404` on `/v1/logs` or `/v1/traces`
 - **Cause:** Codex emits logs and traces alongside metrics; the collector

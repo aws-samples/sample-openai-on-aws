@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Deploy the Codex-on-Bedrock OTel telemetry stack end-to-end:
-#   1. networking.yaml       — VPC + public subnets for the collector
-#   2. otel-collector.yaml   — ADOT collector on Fargate behind an ALB
+#   1. networking.yaml           — VPC + public subnets for the collector
+#   2. otel-collector.yaml       — ADOT collector on Fargate behind an ALB
 #   3. codex-otel-dashboard.yaml — CloudWatch dashboard (usage + spend estimate)
 #
-# Emits the ALB endpoint so you can feed it into generate-codex-sso-config.sh
-# via --otel-endpoint.
+# Emits the ALB endpoint so you can paste it into your Codex config.toml.
 #
 # Prereqs:
-#   - AWS CLI v2 configured against the target account/region
-#   - The IdC + Bedrock auth stack is a separate concern (bedrock-auth-idc.yaml)
+#   - AWS CLI v2 configured against the target account/region (env vars,
+#     ~/.aws/credentials, or `aws sso login`)
+#   - The Bedrock auth stack is a separate concern (bedrock-auth-idc.yaml)
 
 set -euo pipefail
 
@@ -17,19 +17,27 @@ usage() {
   cat <<'EOF'
 Usage: deploy-otel-stack.sh [options]
 
-Options:
+Deploys three CloudFormation stacks (networking + collector + dashboard) to
+provide central OpenTelemetry collection and a CloudWatch dashboard for
+Codex-on-Bedrock usage.
+
+Required: none (all options have sensible defaults).
+
+Common options:
   --region REGION              AWS region (default: us-west-2)
+  --aws-profile PROFILE        AWS named profile to use (optional;
+                               otherwise uses the default credential chain)
   --stack-prefix PREFIX        Prefix for all three stacks (default: codex-otel)
   --dashboard-name NAME        CloudWatch dashboard name (default: CodexOnBedrock)
   --input-price N              USD per 1M input tokens (default: 0.15, placeholder)
   --output-price N             USD per 1M output tokens (default: 0.60, placeholder)
   --cached-input-price N       USD per 1M cached-input tokens (default: 0.075, placeholder)
 
-HTTPS + JWT validation (production hardening — opt-in).
-If any of the flags below are provided, ALL are required. Without them the
-collector deploys in HTTP-only mode, which is OK for sandbox but publishes
-Codex telemetry over the public internet unauthenticated (trust-on-
-distribution). See specs/02-otel-dashboard.md for trade-offs.
+HTTPS + JWT validation (production hardening — opt-in):
+If any of the flags below are provided, ALL of --custom-domain and
+--hosted-zone-id are required for HTTPS. Without them the collector deploys
+in HTTP-only mode, which is OK for sandbox but publishes Codex telemetry
+over the public internet unauthenticated (trust-on-distribution).
 
   --custom-domain FQDN         FQDN for the collector ALB (e.g. otel.codex.example.com).
                                ACM cert is provisioned automatically via DNS validation.
@@ -40,15 +48,34 @@ distribution). See specs/02-otel-dashboard.md for trade-offs.
 
   -h, --help                   Show this help
 
-After deploy completes, the collector endpoint is printed. Pass it to
-generate-codex-sso-config.sh with --otel-endpoint to bake it into the
-distributed Codex config. When JWT validation is enabled, each developer
-also needs to supply a bearer token — set via static header in the Codex
-config, e.g. `headers = { "Authorization" = "Bearer \${CODEX_OTEL_TOKEN}" }`.
+Examples:
+  # Sandbox deploy in us-west-2
+  deploy-otel-stack.sh --region us-west-2
+
+  # Production with HTTPS + Cognito JWT validation
+  deploy-otel-stack.sh \
+      --region us-west-2 \
+      --custom-domain otel.codex.example.com \
+      --hosted-zone-id Z1234567890ABC \
+      --oidc-issuer https://cognito-idp.us-west-2.amazonaws.com/us-west-2_AbCdEf123 \
+      --oidc-jwks   https://cognito-idp.us-west-2.amazonaws.com/us-west-2_AbCdEf123/.well-known/jwks.json \
+      --oidc-client-id 1a2b3c4d5e6f7g8h
+
+After deploy completes, the collector endpoint is printed. Paste it into your
+Codex config.toml under the [otel] section, e.g.:
+
+  [otel]
+  exporter = "otlp-http"
+  endpoint = "<collector-endpoint>"
+
+When JWT validation is enabled, each developer also needs to supply a bearer
+token. See OpenAI Codex configuration reference:
+https://developers.openai.com/codex/config-advanced
 EOF
 }
 
 region="us-west-2"
+aws_profile=""
 prefix="codex-otel"
 dashboard_name="CodexOnBedrock"
 input_price="0.15"
@@ -62,39 +89,102 @@ oidc_client_id=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --region) region="$2"; shift 2;;
-    --stack-prefix) prefix="$2"; shift 2;;
-    --dashboard-name) dashboard_name="$2"; shift 2;;
-    --input-price) input_price="$2"; shift 2;;
-    --output-price) output_price="$2"; shift 2;;
-    --cached-input-price) cached_input_price="$2"; shift 2;;
-    --custom-domain) custom_domain="$2"; shift 2;;
-    --hosted-zone-id) hosted_zone_id="$2"; shift 2;;
-    --oidc-issuer) oidc_issuer="$2"; shift 2;;
-    --oidc-jwks) oidc_jwks="$2"; shift 2;;
-    --oidc-client-id) oidc_client_id="$2"; shift 2;;
+    --region) region="${2:?--region requires a value}"; shift 2;;
+    --aws-profile) aws_profile="${2:?--aws-profile requires a value}"; shift 2;;
+    --stack-prefix) prefix="${2:?--stack-prefix requires a value}"; shift 2;;
+    --dashboard-name) dashboard_name="${2:?--dashboard-name requires a value}"; shift 2;;
+    --input-price) input_price="${2:?--input-price requires a value}"; shift 2;;
+    --output-price) output_price="${2:?--output-price requires a value}"; shift 2;;
+    --cached-input-price) cached_input_price="${2:?--cached-input-price requires a value}"; shift 2;;
+    --custom-domain) custom_domain="${2:?--custom-domain requires a value}"; shift 2;;
+    --hosted-zone-id) hosted_zone_id="${2:?--hosted-zone-id requires a value}"; shift 2;;
+    --oidc-issuer) oidc_issuer="${2:?--oidc-issuer requires a value}"; shift 2;;
+    --oidc-jwks) oidc_jwks="${2:?--oidc-jwks requires a value}"; shift 2;;
+    --oidc-client-id) oidc_client_id="${2:?--oidc-client-id requires a value}"; shift 2;;
     -h|--help) usage; exit 0;;
-    *) echo "unknown flag: $1" >&2; usage; exit 2;;
+    *) echo "Error: unknown flag: $1" >&2; echo "Run with --help for usage." >&2; exit 2;;
   esac
 done
 
-# HTTPS and JWT are independently optional (mirrors the claude-code
-# guidance). ALB jwt-validation action is HTTPS-only (confirmed via CFN
-# deploy probe 2026-05-08: "Actions of type 'jwt-validation' are supported
-# only on HTTPS listeners"), so --oidc-* without --custom-domain has no
-# effect. Warn but don't block.
-https_on=0; jwt_on=0
-[[ -n "$custom_domain" && -n "$hosted_zone_id" ]] && https_on=1
-[[ -n "$oidc_issuer" && -n "$oidc_jwks" ]] && jwt_on=1
-if (( jwt_on == 1 && https_on == 0 )); then
-  echo "Warning: --oidc-* flags require HTTPS (--custom-domain + --hosted-zone-id). JWT validation will be skipped." >&2
-fi
-
-infra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../infrastructure" && pwd)"
-
+# ----------------------------------------------------------------------------
+# Pre-deployment validation
+# ----------------------------------------------------------------------------
+err()  { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; }
+warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*" >&2; }
 log()  { printf '\033[1;34m[%s]\033[0m %s\n' "$(date +%H:%M:%S)" "$*"; }
 ok()   { printf '\033[1;32m[OK]\033[0m %s\n' "$*"; }
 
+# Apply --aws-profile by exporting AWS_PROFILE so all aws CLI calls pick it up.
+if [[ -n "$aws_profile" ]]; then
+  export AWS_PROFILE="$aws_profile"
+fi
+
+if ! command -v aws >/dev/null 2>&1; then
+  err "AWS CLI v2 is required but was not found in PATH."
+  err "Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+  exit 1
+fi
+
+# Region format: lowercase letters + digits, e.g. us-west-2, eu-central-1
+if ! [[ "$region" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]]; then
+  err "Invalid --region value: '$region' (expected format like 'us-west-2')."
+  exit 1
+fi
+
+# Numeric price flags
+for var_name in input_price output_price cached_input_price; do
+  val="${!var_name}"
+  if ! [[ "$val" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    err "--${var_name//_/-} must be a non-negative number; got '$val'."
+    exit 1
+  fi
+done
+
+# Stack prefix sanity (CloudFormation stack-name allows [a-zA-Z][-a-zA-Z0-9]*)
+if ! [[ "$prefix" =~ ^[a-zA-Z][-a-zA-Z0-9]*$ ]]; then
+  err "Invalid --stack-prefix '$prefix' (must match [a-zA-Z][-a-zA-Z0-9]*)."
+  exit 1
+fi
+
+# Verify credentials work against the chosen region.
+if ! aws sts get-caller-identity --region "$region" >/dev/null 2>&1; then
+  err "AWS credentials are not configured or do not have access in region '$region'."
+  err "Try one of:"
+  err "  - export AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY"
+  err "  - aws sso login --profile <your-profile>  (and pass --aws-profile <your-profile>)"
+  err "  - aws configure"
+  exit 1
+fi
+
+# HTTPS / JWT correlation: ALB jwt-validation action is HTTPS-only.
+# Allow either to be set independently, but warn if JWT is requested without HTTPS.
+https_on=0; jwt_on=0
+[[ -n "$custom_domain" && -n "$hosted_zone_id" ]] && https_on=1
+if [[ -n "$custom_domain" && -z "$hosted_zone_id" ]] || [[ -z "$custom_domain" && -n "$hosted_zone_id" ]]; then
+  err "--custom-domain and --hosted-zone-id must be set together for HTTPS."
+  exit 1
+fi
+[[ -n "$oidc_issuer" && -n "$oidc_jwks" ]] && jwt_on=1
+if [[ -n "$oidc_issuer" && -z "$oidc_jwks" ]] || [[ -z "$oidc_issuer" && -n "$oidc_jwks" ]]; then
+  err "--oidc-issuer and --oidc-jwks must be set together."
+  exit 1
+fi
+if (( jwt_on == 1 && https_on == 0 )); then
+  warn "--oidc-* flags require HTTPS (--custom-domain + --hosted-zone-id). JWT validation will be skipped."
+fi
+
+# Templates must exist
+infra_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../infrastructure" && pwd)"
+for tpl in networking.yaml otel-collector.yaml codex-otel-dashboard.yaml; do
+  if [[ ! -f "$infra_dir/$tpl" ]]; then
+    err "CloudFormation template not found: $infra_dir/$tpl"
+    exit 1
+  fi
+done
+
+# ----------------------------------------------------------------------------
+# Deploy
+# ----------------------------------------------------------------------------
 net_stack="${prefix}-networking"
 col_stack="${prefix}-collector"
 dash_stack="${prefix}-dashboard"
@@ -164,17 +254,15 @@ Codex OTel stack deployed.
 Collector endpoint:  $collector_endpoint
 Dashboard:           $dashboard_url
 
-Next step — generate the distributable Codex config pointing at the
-collector, e.g.:
+Next step — point Codex at the collector by appending this block to
+~/.codex/config.toml:
 
-  ./generate-codex-sso-config.sh \\
-      --start-url <your-idc-start-url> \\
-      --sso-region <idc-region> \\
-      --account-id <account-id> \\
-      --permission-set CodexBedrockUser \\
-      --bedrock-region $region \\
-      --otel-endpoint $collector_endpoint \\
-      --outdir ./codex-sso-config
+  [otel]
+  exporter = "otlp-http"
+  endpoint = "$collector_endpoint"
+
+For the full Codex configuration reference, see:
+  https://developers.openai.com/codex/config-advanced
 
 Teardown (reverse order):
   aws cloudformation delete-stack --region $region --stack-name $dash_stack

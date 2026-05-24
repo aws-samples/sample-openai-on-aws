@@ -43,7 +43,7 @@ Resources:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       ManagedPolicyName: !Ref PolicyName
-      Description: Allow Codex clients to invoke approved Bedrock models in approved regions.
+      Description: Allow Codex clients to invoke approved Bedrock models (InvokeModel* and Mantle) in approved regions.
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -58,6 +58,15 @@ Resources:
               - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/${AllowedModelIdPattern}'
               - !Sub 'arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*'
               - !Sub 'arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:application-inference-profile/*'
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AllowedBedrockRegions
+          - Sid: MantleInference
+            Effect: Allow
+            Action:
+              - bedrock-mantle:CreateInference
+              - bedrock-mantle:GetInference
+            Resource: '*'
             Condition:
               StringEquals:
                 aws:RequestedRegion: !Ref AllowedBedrockRegions

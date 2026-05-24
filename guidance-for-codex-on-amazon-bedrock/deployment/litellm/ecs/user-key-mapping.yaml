@@ -33,7 +33,7 @@ Resources:
         - Key: component
           Value: jwt-middleware
         - Key: managed-by
-          Value: cxwb
+          Value: cloudformation
 
 Outputs:
   TableName:

@@ -101,8 +101,9 @@ ok "Binaries available in: $BINARIES_DIR"
 cat <<EOF
 
 Next steps:
-  1. Run 'cxwb distribute' to create developer bundles
-  2. Bundles will include appropriate binary for each platform
+  1. Distribute the binary for each developer's platform alongside the
+     ~/.codex/config.toml [otel] block (see docs/QUICKSTART_NATIVE_AWS_ACCESS.md
+     and docs/deploy-identity-center.md).
 
 Available binaries:
 EOF

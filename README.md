@@ -19,7 +19,7 @@ This guidance provides two production-ready deployment patterns for running Open
 - Per-user CloudTrail audit trails for compliance
 - One-command authentication (`aws sso login` for Native AWS Access, API key for LLM Gateway)
 - Cross-platform support (Windows, macOS, Linux)
-- Guided deployment wizard (`cxwb`) with CloudFormation templates
+- CloudFormation templates for one-command infrastructure deployment
 
 **Native AWS Access:**
 - No API keys or static credentials to manage (uses AWS SSO)
@@ -58,17 +58,9 @@ Need hard quota enforcement? (Block requests when limits hit)
 # Clone repository
 git clone https://github.com/aws-samples/sample-openai-on-aws.git
 cd sample-openai-on-aws/guidance-for-codex-on-amazon-bedrock
-
-# Install wizard
-cd source/ && uv sync
-
-# Run guided deployment (choose your pattern below)
-uv run cxwb init     # Choose pattern and answer prompts
-uv run cxwb deploy   # Deploy infrastructure
-uv run cxwb distribute --bucket my-bucket  # Generate developer bundle
 ```
 
-**After running `cxwb init`, follow the guide for your chosen pattern:**
+Choose your pattern and follow the guide:
 
 - **Native AWS Access?** → [Native AWS Access Quickstart](guidance-for-codex-on-amazon-bedrock/docs/QUICKSTART_NATIVE_AWS_ACCESS.md)
 - **LLM Gateway?** → [LLM Gateway Quickstart](guidance-for-codex-on-amazon-bedrock/docs/QUICKSTART_LLM_GATEWAY.md)

@@ -15,9 +15,9 @@ Question 1: Do you need HARD quota enforcement?
 (Blocking requests when users hit limits, not just alerts)
 
 ├── YES → LLM Gateway
-│         Why: IdC cannot block requests mid-session
+│         Why: IAM Identity Center (IdC) cannot block requests mid-session
 │
-└── NO → Question 2: Already use AWS IAM Identity Center?
+└── NO → Question 2: Already use AWS IAM Identity Center (IdC)?
 
           ├── YES → Native AWS Access
           │         (Fastest: 5 min setup)
@@ -56,6 +56,18 @@ Question 1: Do you need HARD quota enforcement?
 | **Model Routing/Fallback** | ❌ No | ✅ Provided by gateway |
 | **Setup Time** | 5-60 min | 15 min |
 
+> **Quota enforcement is gateway-native, not extra AWS infrastructure.**
+> Hard budgets, per-user / per-team quotas, and RPM/TPM rate limits are
+> first-class features of every modern OpenAI-compatible gateway —
+> [LiteLLM](https://docs.litellm.ai/docs/proxy/users),
+> [Portkey](https://portkey.ai/docs/product/ai-gateway/budget-limits),
+> [Kong AI Gateway](https://docs.konghq.com/hub/kong-inc/ai-rate-limiting-advanced/),
+> and others all expose them via their admin APIs. You configure quotas
+> against the gateway you deploy; you do **not** need a separate AWS
+> Lambda or DynamoDB table for them. See
+> [`docs/QUICKSTART_LLM_GATEWAY.md`](docs/QUICKSTART_LLM_GATEWAY.md#quota-enforcement)
+> for concrete examples.
+
 ---
 
 ## Native AWS Access
@@ -88,8 +100,7 @@ Corporate IdP (Okta/Azure) → SAML → IAM Identity Center → AWS credentials 
 ### What Gets Deployed
 
 - IAM role with Bedrock model invocation policy
-- IAM Identity Center permission set (if not already configured)
-- Developer bundle: bash scripts + config snippets (~15 KB)
+- IAM Identity Center permission set (manual, one-time setup)
 
 ### Quick Start
 
@@ -138,19 +149,18 @@ Corporate IdP (Okta/Azure) → OIDC/JWT → LLM Gateway → Bedrock
 
 ### Gateway Choices
 
-Any OpenAI-compatible gateway works — **[LiteLLM](https://www.litellm.ai/)**, **[Portkey](https://portkey.ai/)**, **[Bifrost](https://github.com/Bifrost-AI/bifrost)**, **[Kong AI Gateway](https://konghq.com/products/kong-ai-gateway)**, **[Helicone](https://helicone.ai/)**, the [AWS Bedrock Gateway sample](https://github.com/aws-samples/bedrock-access-gateway), or a custom FastAPI shim. Choose whichever matches your operational posture.
+Any OpenAI-compatible gateway works — **[LiteLLM](https://www.litellm.ai/)**, **[Portkey](https://portkey.ai/)**, **[Bifrost](https://github.com/maximhq/bifrost)**, **[Kong AI Gateway](https://konghq.com/products/kong-ai-gateway)**, **[Helicone](https://helicone.ai/)**, the [AWS Bedrock Gateway sample](https://github.com/aws-samples/bedrock-access-gateway), or a custom FastAPI shim. Choose whichever matches your operational posture.
 
-This repository ships **LiteLLM** as a reference implementation under `deployment/litellm/` — the `cxwb` wizard deploys it on ECS Fargate. If you bring your own gateway, point developers at it via the wizard's "BYO gateway" path.
+This repository ships **LiteLLM** as a reference implementation under `deployment/litellm/` — deployed on ECS Fargate via the CloudFormation templates in `deployment/litellm/ecs/`. If you bring your own gateway, deploy only the auth/networking stacks and point developers at your gateway URL.
 
 ### What Gets Deployed (Reference Implementation)
 
-When `cxwb` deploys the LiteLLM reference:
+When you deploy the LiteLLM reference stacks:
 
 - VPC with public/private subnets (or use existing VPC)
 - ECS Fargate cluster running the gateway
 - Application Load Balancer for ingress
 - RDS Postgres for gateway state
-- Developer bundle: config snippets + gateway URL (~8 KB)
 
 ### Quick Start
 
@@ -169,7 +179,7 @@ When `cxwb` deploys the LiteLLM reference:
 | **Authentication** | Switch from SAML (IdC) to OIDC (Gateway) |
 | **IdP Setup** | Create new OIDC app in your IdP |
 | **Developer Workflow** | Change from `aws sso login` to API key |
-| **Codex Config** | Change `model_provider` from `amazon-bedrock` to `openai` |
+| **Codex Config** | Change `model_provider` from `amazon-bedrock` to custom provider name (e.g., `litellm-gateway`) |
 | **CloudTrail** | Attribution changes from per-user to gateway IAM role |
 
 **Migration time:** 2-4 hours infrastructure + 1 hour per 10 developers for reconfiguration
@@ -183,8 +193,10 @@ When `cxwb` deploys the LiteLLM reference:
 | Model ID | Notes |
 |----------|-------|
 | `openai.gpt-5.4` | **Recommended default.** Served via Bedrock Mantle. |
-| `openai.gpt-oss-120b` | GPT-OSS 120B (Converse-compatible). |
-| `openai.gpt-oss-20b` | GPT-OSS 20B (Converse-compatible). |
+| `openai.gpt-oss-120b-1:0` | GPT-OSS 120B (Converse-compatible). |
+| `openai.gpt-oss-20b-1:0` | GPT-OSS 20B (Converse-compatible). |
+| `openai.gpt-oss-safeguard-120b` | Safeguard variant. |
+| `openai.gpt-oss-safeguard-20b` | Safeguard variant. |
 
 **Regions:** Available in `us-east-1`, `us-east-2`, `us-west-2`
 
@@ -212,17 +224,57 @@ Full region × model matrix: **[docs/reference-regions.md](docs/reference-region
 
 ---
 
-## Quick Setup with `cxwb` Wizard
+## Quick Setup with CloudFormation
 
-Both patterns can be deployed using the guided `cxwb` wizard:
+Both patterns deploy directly with the AWS CLI against the templates under `deployment/infrastructure/` and `deployment/litellm/ecs/`. Follow the pattern-specific guide for end-to-end steps; the snippets below show the core commands.
+
+### Native AWS Access
 
 ```bash
-cd source/
-uv sync
-uv run cxwb init                        # Pick pattern, answer prompts
-uv run cxwb deploy --profile <name>     # Deploy CloudFormation stacks
-uv run cxwb distribute --profile <name> # Generate developer bundles
+AWS_REGION=us-west-2
+
+aws cloudformation deploy \
+  --stack-name codex-bedrock-idc \
+  --template-file deployment/infrastructure/bedrock-auth-idc.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region "$AWS_REGION" \
+  --parameter-overrides AllowedBedrockRegions="$AWS_REGION"
 ```
+
+After the stack succeeds, create the `CodexBedrockUser` permission set in IAM Identity Center, then distribute the `~/.aws/config` and `~/.codex/config.toml` snippets shown in the [Developer Configuration](docs/QUICKSTART_NATIVE_AWS_ACCESS.md#developer-configuration) section of the full guide.
+
+**Full guide:** [docs/QUICKSTART_NATIVE_AWS_ACCESS.md](docs/QUICKSTART_NATIVE_AWS_ACCESS.md)
+
+### LLM Gateway (LiteLLM reference)
+
+```bash
+AWS_REGION=us-west-2
+
+aws cloudformation deploy \
+  --stack-name codex-networking \
+  --template-file deployment/infrastructure/networking.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region "$AWS_REGION"
+
+# Build and push the LiteLLM image to ECR first; see the full guide for the
+# docker buildx commands and the LiteLLMImage / LiteLLMMasterKey / DBPassword
+# values required by litellm-ecs.yaml.
+aws cloudformation deploy \
+  --stack-name codex-litellm-gateway \
+  --template-file deployment/litellm/ecs/litellm-ecs.yaml \
+  --capabilities CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+  --region "$AWS_REGION" \
+  --parameter-overrides \
+      NetworkingStackName=codex-networking \
+      AwsRegion="$AWS_REGION" \
+      LiteLLMImage="$LITELLM_IMAGE" \
+      LiteLLMMasterKey="$LITELLM_MASTER_KEY" \
+      DBPassword="$DB_PASSWORD"
+```
+
+After the gateway is reachable, distribute the `~/.codex/config.toml` snippet shown in the [Developer Configuration](docs/QUICKSTART_LLM_GATEWAY.md#developer-configuration) section of the full guide.
+
+**Full guide:** [docs/QUICKSTART_LLM_GATEWAY.md](docs/QUICKSTART_LLM_GATEWAY.md)
 
 **Supported deployment paths:**
 - IdC + new stacks (Native AWS Access)
@@ -237,11 +289,9 @@ uv run cxwb distribute --profile <name> # Generate developer bundles
 ### For Administrators (Deployment)
 
 **Software:**
-- Python 3.10-3.13
-- uv (package manager - [install guide](https://docs.astral.sh/uv/getting-started/installation/))
 - AWS CLI v2
 - Git
-- Docker (for LLM Gateway deployments)
+- Docker (for LLM Gateway deployments — building the LiteLLM image)
 
 **AWS Permissions:**
 - CloudFormation stack creation
@@ -309,27 +359,25 @@ Yes, single-digit milliseconds (typically <10ms) as requests route through the g
 
 **What does the reference LLM Gateway cost to run?**
 
-~$100-150/month for AWS infrastructure (ECS Fargate ~$70, ALB ~$20, RDS Postgres ~$30). Gateway licensing depends on the product you choose — review each vendor's pricing.
-
-**Are AWS GovCloud regions supported?**
-
-Yes. Both patterns support AWS GovCloud (US) and commercial regions where Bedrock is available.
+~$100-150/month for AWS infrastructure (ECS Fargate ~$70, ALB ~$20, Amazon RDS for PostgreSQL ~$30). Gateway licensing depends on the product you choose — review each vendor's pricing.
 
 **Where do I report issues?**
 
-→ [GitHub Issues](https://github.com/aws-samples/guidance-for-codex-on-aws/issues)
+→ [GitHub Issues](https://github.com/aws-samples/sample-openai-on-aws/issues)
 
 ---
 
 ## License
 
-This guidance is licensed under [MIT](LICENSE).
+This guidance is licensed under [MIT No Attribution](LICENSE).
 
 ---
 
 ## Related Resources
 
-- **[OpenAI Codex](https://github.com/openai/codex)** — Official Codex documentation
+- **[OpenAI Codex (GitHub)](https://github.com/openai/codex)** — Codex source and release notes
+- **[OpenAI Codex CLI](https://developers.openai.com/codex/cli)** — Install, authenticate, and run Codex
+- **[OpenAI Codex Advanced Configuration](https://developers.openai.com/codex/config-advanced)** — Custom providers, profiles, sandbox, OpenTelemetry
 - **[Amazon Bedrock](https://aws.amazon.com/bedrock/)** — AWS managed AI service
 - **[LiteLLM](https://www.litellm.ai/)** — Reference LLM gateway used in this guidance
 - **[AWS IAM Identity Center](https://aws.amazon.com/iam/identity-center/)** — AWS SSO service

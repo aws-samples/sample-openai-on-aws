@@ -1,14 +1,73 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ABOUTME: Interactive deployment script for Cognito User Pool with optional custom domain
 # ABOUTME: Supports both interactive and non-interactive modes for flexible deployment
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INFRA_DIR="$(cd "$SCRIPT_DIR/../infrastructure" && pwd)"
 
+# ---------------------------------------------------------------------------
+# Help text
+# ---------------------------------------------------------------------------
+print_help() {
+  cat <<EOF
+Deploy Cognito User Pool for Codex with Bedrock
+
+This script provisions an Amazon Cognito User Pool that can act as the OIDC
+provider for the Codex LLM Gateway (LiteLLM JWT middleware) or for any other
+component requiring OIDC.
+
+Usage:
+  Interactive mode (prompts for all values):
+    $0
+
+  Non-interactive mode (fully scripted):
+    $0 --stack-name <name> --region <region> [options]
+
+Required (in non-interactive mode):
+  --stack-name <name>         CloudFormation stack name (CFN: [a-zA-Z][-a-zA-Z0-9]*)
+  --region <region>           AWS region (e.g. us-west-2)
+
+Optional:
+  --aws-profile <profile>     AWS named profile to use (otherwise uses
+                              default credential chain)
+  --user-pool-name <name>     Cognito User Pool name (defaults to stack name)
+  --domain-prefix <prefix>    Domain prefix for the default Cognito-managed
+                              domain. Cannot contain the reserved word
+                              'cognito'. Defaults to stack name with
+                              'cognito' replaced by 'auth'.
+  --custom-domain <domain>    Optional custom domain (e.g. auth.example.com).
+                              When set, an ACM cert in us-east-1 is
+                              provisioned automatically via DNS validation.
+  --hosted-zone-id <id>       Route 53 Hosted Zone ID. Required when
+                              --custom-domain is set. Format: Z[A-Z0-9]+.
+  -h, --help                  Show this help message
+
+Examples:
+  # Interactive mode
+  $0
+
+  # Default Cognito-managed domain
+  $0 --stack-name my-cognito --region us-east-1
+
+  # Custom domain in us-east-1
+  $0 --stack-name my-cognito --region us-east-1 \\
+     --custom-domain auth.example.com --hosted-zone-id Z123ABC
+
+  # Custom domain in different region (cert still goes to us-east-1)
+  $0 --stack-name my-cognito --region us-west-2 \\
+     --custom-domain auth.example.com --hosted-zone-id Z123ABC \\
+     --aws-profile my-admin-profile
+EOF
+}
+
+# ---------------------------------------------------------------------------
 # Parse arguments
+# ---------------------------------------------------------------------------
 STACK_NAME=""
 REGION=""
+AWS_PROFILE_ARG=""
 CUSTOM_DOMAIN=""
 HOSTED_ZONE_ID=""
 USER_POOL_NAME=""
@@ -16,76 +75,32 @@ DOMAIN_PREFIX=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --stack-name)
-      STACK_NAME="$2"
-      shift 2
-      ;;
-    --region)
-      REGION="$2"
-      shift 2
-      ;;
-    --custom-domain)
-      CUSTOM_DOMAIN="$2"
-      shift 2
-      ;;
-    --hosted-zone-id)
-      HOSTED_ZONE_ID="$2"
-      shift 2
-      ;;
-    --user-pool-name)
-      USER_POOL_NAME="$2"
-      shift 2
-      ;;
-    --domain-prefix)
-      DOMAIN_PREFIX="$2"
-      shift 2
-      ;;
-    -h|--help)
-      cat << EOF
-Deploy Cognito User Pool for Codex with Bedrock
-
-Usage:
-  Interactive mode:
-    $0
-
-  Non-interactive mode:
-    $0 --stack-name <name> --region <region> [options]
-
-Options:
-  --stack-name <name>         CloudFormation stack name
-  --region <region>           AWS region for deployment
-  --custom-domain <domain>    Optional custom domain (e.g., auth.3pmod.dev)
-  --hosted-zone-id <id>       Route 53 Hosted Zone ID (required with --custom-domain)
-  --user-pool-name <name>     Cognito User Pool name (defaults to stack name)
-  --domain-prefix <prefix>    Domain prefix for default domain (defaults to stack name)
-  -h, --help                  Show this help message
-
-Examples:
-  # Interactive mode
-  $0
-
-  # Default Cognito domain
-  $0 --stack-name my-cognito --region us-east-1
-
-  # Custom domain in us-east-1
-  $0 --stack-name my-cognito --region us-east-1 \\
-     --custom-domain auth.example.com --hosted-zone-id Z123ABC
-
-  # Custom domain in different region
-  $0 --stack-name my-cognito --region us-west-2 \\
-     --custom-domain auth.example.com --hosted-zone-id Z123ABC
-EOF
-      exit 0
-      ;;
+    --stack-name)        STACK_NAME="${2:?--stack-name requires a value}"; shift 2;;
+    --region)            REGION="${2:?--region requires a value}"; shift 2;;
+    --aws-profile)       AWS_PROFILE_ARG="${2:?--aws-profile requires a value}"; shift 2;;
+    --custom-domain)     CUSTOM_DOMAIN="${2:?--custom-domain requires a value}"; shift 2;;
+    --hosted-zone-id)    HOSTED_ZONE_ID="${2:?--hosted-zone-id requires a value}"; shift 2;;
+    --user-pool-name)    USER_POOL_NAME="${2:?--user-pool-name requires a value}"; shift 2;;
+    --domain-prefix)     DOMAIN_PREFIX="${2:?--domain-prefix requires a value}"; shift 2;;
+    -h|--help)           print_help; exit 0;;
     *)
-      echo "Unknown option: $1"
-      echo "Use --help for usage information"
-      exit 1
+      echo "Error: Unknown option: $1" >&2
+      echo "Run with --help for usage information." >&2
+      exit 2
       ;;
   esac
 done
 
-# Function to prompt for input
+# Apply --aws-profile by exporting AWS_PROFILE so all aws CLI calls pick it up.
+if [[ -n "$AWS_PROFILE_ARG" ]]; then
+  export AWS_PROFILE="$AWS_PROFILE_ARG"
+fi
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+err() { echo "Error: $*" >&2; }
+
 prompt_input() {
   local prompt="$1"
   local default="$2"
@@ -100,7 +115,6 @@ prompt_input() {
   fi
 }
 
-# Function to prompt yes/no
 prompt_yn() {
   local prompt="$1"
   local default="$2"
@@ -117,10 +131,29 @@ prompt_yn() {
   [[ "$result" =~ ^[Yy] ]]
 }
 
-# Interactive mode if no parameters provided
+# ---------------------------------------------------------------------------
+# Pre-flight checks (run regardless of interactive vs non-interactive)
+# ---------------------------------------------------------------------------
+if ! command -v aws >/dev/null 2>&1; then
+  err "AWS CLI v2 is required but was not found in PATH."
+  err "Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+  exit 1
+fi
+
+# Templates must exist
+for tpl in cognito-user-pool-setup.yaml cognito-custom-domain-cert.yaml; do
+  if [[ ! -f "$INFRA_DIR/$tpl" ]]; then
+    err "CloudFormation template not found: $INFRA_DIR/$tpl"
+    exit 1
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# Interactive mode (only when no required flags provided)
+# ---------------------------------------------------------------------------
 if [ -z "$STACK_NAME" ] && [ -z "$REGION" ]; then
   echo "╭────────────────────────────────────────────────────────────╮"
-  echo "│  Cognito User Pool Deployment for Codex with Bedrock │"
+  echo "│  Cognito User Pool Deployment for Codex with Bedrock       │"
   echo "╰────────────────────────────────────────────────────────────╯"
   echo ""
 
@@ -131,25 +164,17 @@ if [ -z "$STACK_NAME" ] && [ -z "$REGION" ]; then
   echo "Current AWS Account: $CURRENT_ACCOUNT"
   echo ""
 
-  # Stack name
   STACK_NAME=$(prompt_input "Stack name" "codex-cognito")
-
-  # Region
   REGION=$(prompt_input "AWS Region" "$CURRENT_REGION")
-
-  # User pool name
   USER_POOL_NAME=$(prompt_input "User Pool name" "$STACK_NAME")
 
-  # Custom domain
   echo ""
   if prompt_yn "Use custom domain?" "n"; then
     CUSTOM_DOMAIN=$(prompt_input "Custom domain (e.g., auth.example.com)" "")
 
     if [ -n "$CUSTOM_DOMAIN" ]; then
-      # Try to auto-detect hosted zone
       DOMAIN_PARTS=(${CUSTOM_DOMAIN//./ })
       if [ ${#DOMAIN_PARTS[@]} -ge 2 ]; then
-        # Extract root domain (last 2 parts) - portable array indexing
         PARTS_COUNT=${#DOMAIN_PARTS[@]}
         SECOND_LAST_IDX=$((PARTS_COUNT - 2))
         LAST_IDX=$((PARTS_COUNT - 1))
@@ -200,45 +225,81 @@ if [ -z "$STACK_NAME" ] && [ -z "$REGION" ]; then
   echo ""
 fi
 
-# Validate required parameters
+# ---------------------------------------------------------------------------
+# Validate required parameters (post-interactive, post-CLI)
+# ---------------------------------------------------------------------------
 if [ -z "$STACK_NAME" ] || [ -z "$REGION" ]; then
-  echo "Error: Missing required parameters"
-  echo "Use --help for usage information"
+  err "Missing required parameters: --stack-name and --region are both required."
+  err "Run with --help for usage information."
   exit 1
 fi
 
-# Set defaults
+# CloudFormation stack-name format
+if ! [[ "$STACK_NAME" =~ ^[a-zA-Z][-a-zA-Z0-9]*$ ]]; then
+  err "Invalid --stack-name '$STACK_NAME' (must match [a-zA-Z][-a-zA-Z0-9]*)."
+  exit 1
+fi
+
+# Region format
+if ! [[ "$REGION" =~ ^[a-z]{2}-[a-z]+-[0-9]+$ ]]; then
+  err "Invalid --region value: '$REGION' (expected format like 'us-west-2')."
+  exit 1
+fi
+
+# Verify credentials work
+if ! aws sts get-caller-identity --region "$REGION" >/dev/null 2>&1; then
+  err "AWS credentials are not configured or do not have access in region '$REGION'."
+  err "Try one of:"
+  err "  - export AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY"
+  err "  - aws sso login --profile <your-profile> (and pass --aws-profile <your-profile>)"
+  err "  - aws configure"
+  exit 1
+fi
+
+# Default values
 USER_POOL_NAME=${USER_POOL_NAME:-$STACK_NAME}
 
 # Default domain prefix - avoid reserved word "cognito"
 if [ -z "$DOMAIN_PREFIX" ]; then
-  # Remove "cognito" from stack name if present
   DOMAIN_PREFIX=$(echo "$STACK_NAME" | sed 's/cognito/auth/gi')
 fi
 
 # Validate domain prefix doesn't contain "cognito" (reserved word)
 if [ -n "$DOMAIN_PREFIX" ] && echo "$DOMAIN_PREFIX" | grep -qi "cognito"; then
-  echo "✗ Error: Domain prefix cannot contain the reserved word 'cognito'"
-  echo "  Current value: $DOMAIN_PREFIX"
-  echo "  Please use --domain-prefix with a different value"
+  err "Domain prefix cannot contain the reserved word 'cognito'."
+  err "  Current value: $DOMAIN_PREFIX"
+  err "  Pass --domain-prefix with a different value."
   exit 1
 fi
 
-# Determine if custom domain is being used
+# Custom-domain coupling
 if [ -n "$CUSTOM_DOMAIN" ]; then
-  USE_CUSTOM_DOMAIN="true"
-
   if [ -z "$HOSTED_ZONE_ID" ]; then
-    echo "Error: --hosted-zone-id is required when using --custom-domain"
+    err "--hosted-zone-id is required when using --custom-domain."
     exit 1
   fi
+  if ! [[ "$HOSTED_ZONE_ID" =~ ^Z[A-Z0-9]+$ ]]; then
+    err "Invalid --hosted-zone-id '$HOSTED_ZONE_ID' (expected format like 'Z1234567890ABC')."
+    exit 1
+  fi
+fi
+if [ -z "$CUSTOM_DOMAIN" ] && [ -n "$HOSTED_ZONE_ID" ]; then
+  err "--hosted-zone-id was supplied without --custom-domain. Either pass both or neither."
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Deploy
+# ---------------------------------------------------------------------------
+if [ -n "$CUSTOM_DOMAIN" ]; then
+  USE_CUSTOM_DOMAIN="true"
 
   # Always use two-stack approach for custom domains
   # Certificate stack is always in us-east-1 (Cognito requirement)
   echo "→ Custom domain requires certificate in us-east-1"
   echo "→ Using two-stack deployment approach..."
 
-  # Extract parent domain from custom domain (e.g., "3pmod.dev" from "auth.3pmod.dev")
+  # Extract parent domain from custom domain (e.g., "example.com" from "auth.example.com")
   DOMAIN_PARTS=(${CUSTOM_DOMAIN//./ })
   PARTS_COUNT=${#DOMAIN_PARTS[@]}
   SECOND_LAST_IDX=$((PARTS_COUNT - 2))
@@ -272,7 +333,7 @@ if [ -n "$CUSTOM_DOMAIN" ]; then
 
   aws cloudformation deploy \
     --region us-east-1 \
-    --template-file "$SCRIPT_DIR/../infrastructure/cognito-custom-domain-cert.yaml" \
+    --template-file "$INFRA_DIR/cognito-custom-domain-cert.yaml" \
     --stack-name "$CERT_STACK_NAME" \
     --parameter-overrides \
       CustomDomainName="$CUSTOM_DOMAIN" \
@@ -282,13 +343,12 @@ if [ -n "$CUSTOM_DOMAIN" ]; then
     --no-fail-on-empty-changeset
 
   if [ $? -ne 0 ]; then
-    echo "✗ Failed to deploy certificate stack"
+    err "Failed to deploy certificate stack"
     exit 1
   fi
 
   echo "✓ Certificate stack deployed successfully"
 
-  # Get certificate ARN
   CERT_ARN=$(aws cloudformation describe-stacks \
     --region us-east-1 \
     --stack-name "$CERT_STACK_NAME" \
@@ -296,11 +356,10 @@ if [ -n "$CUSTOM_DOMAIN" ]; then
     --output text)
 
   if [ -z "$CERT_ARN" ]; then
-    echo "✗ Failed to get certificate ARN from stack outputs"
+    err "Failed to get certificate ARN from stack outputs"
     exit 1
   fi
 
-  # Verify certificate is issued
   CERT_STATUS=$(aws acm describe-certificate \
     --certificate-arn "$CERT_ARN" \
     --region us-east-1 \
@@ -334,7 +393,7 @@ fi
 
 aws cloudformation deploy \
   --region "$REGION" \
-  --template-file "$SCRIPT_DIR/../infrastructure/cognito-user-pool-setup.yaml" \
+  --template-file "$INFRA_DIR/cognito-user-pool-setup.yaml" \
   --stack-name "$STACK_NAME" \
   --parameter-overrides $PARAMS \
   --capabilities CAPABILITY_IAM
@@ -344,21 +403,17 @@ echo "✓ Cognito User Pool deployed successfully"
 echo ""
 
 # Display outputs
-echo "╭─── Codex Configuration ───╮"
+echo "╭─── Cognito Stack Outputs ───╮"
 aws cloudformation describe-stacks \
   --region "$REGION" \
   --stack-name "$STACK_NAME" \
-  --query 'Stacks[0].Outputs[?OutputKey==`CodexConfiguration`].OutputValue' \
-  --output text
+  --query 'Stacks[0].Outputs' \
+  --output table
 
-# If custom domain, show DNS configuration status
 if [ "$USE_CUSTOM_DOMAIN" = "true" ]; then
   echo ""
   echo "╭─── Custom Domain Configured ───╮"
-
-  # Wait a moment for domain to be available
   sleep 2
-
   echo "✓ Route 53 A record created automatically"
   echo "✓ DNS: $CUSTOM_DOMAIN → CloudFront"
   echo ""
@@ -366,9 +421,25 @@ if [ "$USE_CUSTOM_DOMAIN" = "true" ]; then
   echo ""
 fi
 
-echo ""
-echo "Next steps:"
-echo "1. Run: cxwb init"
-echo "2. Use the configuration values shown above"
-echo "3. Deploy the rest of the infrastructure: cxwb deploy"
-echo ""
+cat <<EOF
+
+Next steps:
+  1. Capture the User Pool ID, Client ID, and Issuer URL from the outputs above.
+  2. Build and push the LiteLLM Gateway images, then deploy the gateway stack
+     directly with CloudFormation:
+
+        aws cloudformation deploy \\
+          --stack-name codex-litellm-gateway \\
+          --template-file deployment/litellm/ecs/litellm-ecs.yaml \\
+          --capabilities CAPABILITY_NAMED_IAM \\
+          --region $REGION \\
+          --parameter-overrides \\
+              EnableJwtMiddleware=true \\
+              JwksUrl=<issuer-url>/.well-known/jwks.json \\
+              JwtIssuer=<issuer-url> \\
+              JwtAudience=<app-client-id> \\
+              ...
+
+     See docs/QUICKSTART_LLM_GATEWAY.md for the full step-by-step guide.
+
+EOF

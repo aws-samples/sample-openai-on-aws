@@ -1,11 +1,11 @@
 # Quick Start: Native AWS Access
 
-Deploy Codex on Bedrock with IAM Identity Center authentication in 5-60 minutes.
+Deploy Codex on Bedrock with IAM Identity Center authentication in 5-60 minutes using direct CloudFormation deployment.
 
 **Use this pattern if:**
-- ✅ You already use AWS IAM Identity Center, OR
-- ✅ You're willing to set up IdC + SAML federation, AND
-- ✅ Soft monitoring (alerts, not blocking) is sufficient
+- You already use AWS IAM Identity Center, OR
+- You're willing to set up IdC + SAML federation, AND
+- Soft monitoring (alerts, not blocking) is sufficient
 
 ---
 
@@ -13,7 +13,7 @@ Deploy Codex on Bedrock with IAM Identity Center authentication in 5-60 minutes.
 
 **What You're Deploying:**
 ```
-Corporate IdP (Okta/Azure) → SAML → IAM Identity Center → AWS credentials → Bedrock
+Corporate IdP (Okta/Azure) -> SAML -> IAM Identity Center -> AWS credentials -> Bedrock
 ```
 
 ---
@@ -25,16 +25,15 @@ Corporate IdP (Okta/Azure) → SAML → IAM Identity Center → AWS credentials 
 - [ ] AWS account with admin permissions (IAM, CloudFormation, Identity Center)
 - [ ] Amazon Bedrock activated in target region (e.g., `us-west-2`)
 - [ ] AWS CLI v2 installed ([download](https://aws.amazon.com/cli/))
-- [ ] Python 3.10-3.13 + uv ([install uv](https://docs.astral.sh/uv/getting-started/installation/))
 - [ ] Identity provider with SAML 2.0 support (Okta, Azure AD, Auth0, Google Workspace)
+- [ ] [Codex CLI](https://developers.openai.com/codex/cli) installed locally
 
 ### IdP-Specific Guides
 
-Choose your identity provider:
-- **Okta** → [providers/okta-setup.md](providers/okta-setup.md) *(coming soon)*
-- **Microsoft Entra ID (Azure AD)** → [providers/microsoft-entra-id-setup.md](providers/microsoft-entra-id-setup.md) *(coming soon)*
-- **Auth0** → [providers/auth0-setup.md](providers/auth0-setup.md) *(coming soon)*
-- **Google Workspace** → [providers/google-workspace-setup.md](providers/google-workspace-setup.md) *(coming soon)*
+For identity provider setup with IAM Identity Center, see AWS documentation:
+- [Okta](https://docs.aws.amazon.com/singlesignon/latest/userguide/gs-okta.html)
+- [EntraID](https://docs.aws.amazon.com/singlesignon/latest/userguide/gs-entra.html)
+- [Auth0, Google Workspace, and others](https://docs.aws.amazon.com/singlesignon/latest/userguide/manage-your-identity-source-idp.html)
 
 ---
 
@@ -44,74 +43,128 @@ Choose your identity provider:
 
 **If your organization already uses IAM Identity Center for AWS access:**
 
+#### Step 1: Clone Repository
+
 ```bash
-# 1. Clone repo
-git clone https://github.com/aws-samples/guidance-for-codex-on-aws.git
-cd guidance-for-codex-on-aws/guidance-for-codex-on-amazon-bedrock
-
-# 2. Install CLI
-cd source/
-uv sync
-
-# 3. Run wizard (select "IAM Identity Center" path)
-uv run cxwb init
-
-# Answer prompts:
-# - Deployment path? → IAM Identity Center
-# - Manage infrastructure? → Yes (deploy new stacks)
-# - IdC start URL? → https://d-xxxxxxxxxx.awsapps.com/start
-# - IdC region? → (your IdC home region, e.g., us-east-1)
-# - AWS account ID? → 123456789012
-# - Permission set name? → CodexBedrockUser
-# - Bedrock region? → us-west-2
-# - Default model? → openai.gpt-5.4
-# - Profile name? → codex-bedrock
-
-# 4. Deploy CloudFormation stack
-uv run cxwb deploy --profile codex-bedrock
-
-# This creates:
-# - IAM role: BedrockInvokeRole
-# - IAM policy: CodexBedrockPolicy (scoped to bedrock:InvokeModel)
-# Output: Customer-managed policy ARN
-
-# 5. Create permission set in IAM Identity Center
-# (One-time manual step via AWS Console)
+git clone https://github.com/aws-samples/sample-openai-on-aws.git
+cd sample-openai-on-aws/guidance-for-codex-on-amazon-bedrock
 ```
 
-**AWS Console Steps (Identity Center):**
+#### Step 2: Deploy the Bedrock Auth Stack
+
+```bash
+# Set deployment variables
+AWS_REGION=us-west-2                          # Bedrock region
+STACK_NAME=codex-bedrock-idc
+TEMPLATE_FILE=deployment/infrastructure/bedrock-auth-idc.yaml
+
+# Deploy CloudFormation stack
+aws cloudformation deploy \
+  --stack-name "$STACK_NAME" \
+  --template-file "$TEMPLATE_FILE" \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region "$AWS_REGION" \
+  --parameter-overrides \
+      RoleName=CodexBedrockIdCRole \
+      PolicyName=CodexBedrockInvokePolicy \
+      PermissionSetNamePattern='CodexBedrockUser_*' \
+      AllowedBedrockRegions='us-east-1,us-west-2' \
+      AllowedModelIdPattern='*' \
+      MaxSessionDurationSeconds=28800
+
+# Wait for completion (2-3 minutes)
+aws cloudformation wait stack-create-complete \
+  --stack-name "$STACK_NAME" \
+  --region "$AWS_REGION"
+
+# Read the outputs (capture RoleArn and PolicyArn)
+aws cloudformation describe-stacks \
+  --stack-name "$STACK_NAME" \
+  --region "$AWS_REGION" \
+  --query 'Stacks[0].Outputs'
+```
+
+**Stack creates:**
+- IAM Role: `CodexBedrockIdCRole`
+- IAM Managed Policy: `CodexBedrockInvokePolicy` (scoped to `bedrock:InvokeModel*` and `bedrock-mantle:CreateInference` for GPT-5.4 via the Mantle endpoint)
+- Trust relationship: trusted by `AWSReservedSSO_CodexBedrockUser_*` role-chaining
+
+#### Step 3: Create the Permission Set in IAM Identity Center
+
+The CloudFormation stack provisions IAM resources but cannot create the permission set itself — IAM Identity Center lives outside CloudFormation's scope. Use the CLI steps below (recommended for automation) or the console fallback.
+
+**Option A: CLI (scriptable, CI/CD friendly)**
+
+```bash
+# Get your IdC instance ARN
+IDC_INSTANCE_ARN=$(aws sso-admin list-instances --region us-east-1 \
+  --query 'Instances[0].InstanceArn' --output text)
+IDENTITY_STORE_ID=$(aws sso-admin list-instances --region us-east-1 \
+  --query 'Instances[0].IdentityStoreId' --output text)
+
+# Read the policy ARN from Step 2 outputs
+POLICY_ARN=$(aws cloudformation describe-stacks \
+  --stack-name "$STACK_NAME" --region "$AWS_REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`PolicyArn`].OutputValue' --output text)
+
+# Create the permission set
+PS_ARN=$(aws sso-admin create-permission-set \
+  --instance-arn "$IDC_INSTANCE_ARN" \
+  --name CodexBedrockUser \
+  --session-duration PT8H \
+  --region us-east-1 \
+  --query 'PermissionSet.PermissionSetArn' --output text)
+
+# Attach the customer-managed policy
+aws sso-admin attach-customer-managed-policy-reference-to-permission-set \
+  --instance-arn "$IDC_INSTANCE_ARN" \
+  --permission-set-arn "$PS_ARN" \
+  --customer-managed-policy-reference "Name=CodexBedrockInvokePolicy,Path=/" \
+  --region us-east-1
+
+# Assign to a group (recommended) or individual user
+# For a group:
+GROUP_ID=$(aws identitystore list-groups \
+  --identity-store-id "$IDENTITY_STORE_ID" \
+  --filters AttributePath=DisplayName,AttributeValue=<YourCodexGroup> \
+  --region us-east-1 \
+  --query 'Groups[0].GroupId' --output text)
+
+aws sso-admin create-account-assignment \
+  --instance-arn "$IDC_INSTANCE_ARN" \
+  --permission-set-arn "$PS_ARN" \
+  --principal-type GROUP --principal-id "$GROUP_ID" \
+  --target-type AWS_ACCOUNT --target-id "$AWS_ACCOUNT_ID" \
+  --region us-east-1
+
+# Wait for assignment to complete (~15 seconds)
+sleep 15
+```
+
+**Option B: AWS Console**
 
 1. Open IAM Identity Center: https://console.aws.amazon.com/singlesignon
-2. Navigate to **Multi-account permissions** → **Permission sets**
-3. Click **Create permission set**
-4. Choose **Custom permission set**
-5. Name: `CodexBedrockUser`
-6. Session duration: `8 hours` (or your org policy)
-7. Under **Customer managed policies**, attach the policy ARN from step 4
-8. Click **Create**
-9. Navigate to **AWS accounts** → Select your account → **Assign users or groups**
-10. Select permission set: `CodexBedrockUser`
-11. Select users/groups: Your Codex developer group
-12. Click **Submit**
+2. Navigate to **Multi-account permissions** -> **Permission sets**
+3. Click **Create permission set** -> **Custom permission set**
+4. Name: `CodexBedrockUser`, session duration: `8 hours`
+5. Under **Customer managed policies**, attach the policy ARN from Step 2 outputs
+6. Navigate to **AWS accounts** -> select your account -> **Assign users or groups**
+7. Select permission set `CodexBedrockUser`, select your Codex developer group, click **Submit**
 
-```bash
-# 6. Generate developer bundle
-uv run cxwb distribute --profile codex-bedrock --bucket my-distribution-bucket
+#### Step 4: Distribute Configuration to Developers
 
-# Output: S3 presigned URL valid for 7 days
-# Share this URL with developers
-```
+Share three values with your developers:
 
-**Bundle contents:**
-```
-<profile-name>-config/
-├── install.sh              # Developer runs this
-├── uninstall.sh            # Cleanup script
-├── codex-sso-creds         # Credential helper (bash script)
-├── aws-config.snippet      # AWS config fragment
-├── codex-config.toml.snippet # Codex config fragment
-└── DEV-SETUP.md            # Developer instructions
-```
+1. **IdC Start URL** - From IdC console (e.g., `https://d-xxxxxxxxxx.awsapps.com/start`)
+2. **AWS Account ID** - Your 12-digit account ID
+3. **Permission Set Name** - The role name, e.g., `CodexBedrockUser`
+
+Developers will add these to their `~/.aws/config` and `~/.codex/config.toml` files. See [Developer Configuration](#developer-configuration) below for the exact config snippets.
+
+**Distribution options:**
+- Email/Slack the three values + config snippets from the [Developer Configuration](#developer-configuration) section
+- Add to your internal wiki/docs portal
+- Use your existing onboarding automation (e.g., internal CLI tool, Terraform workspaces)
 
 ---
 
@@ -122,172 +175,97 @@ uv run cxwb distribute --profile codex-bedrock --bucket my-distribution-bucket
 #### Step 1: Enable IAM Identity Center
 
 ```bash
-# 1. Choose your IdC home region
-# (This is where IdC lives; can be different from Bedrock region)
+# 1. Choose your IdC home region (this is where IdC lives; can be
+#    different from Bedrock region)
 AWS_REGION=us-east-1
 
-# 2. Enable Identity Center (via AWS Console)
-# Go to: https://console.aws.amazon.com/singlesignon
-# Click "Enable"
-# 
-# This creates your IdC instance and gives you:
-# - Start URL: https://d-xxxxxxxxxx.awsapps.com/start
-# - Identity source: (default) Identity Center directory
+# 2. Enable Identity Center via the AWS Console:
+#    https://console.aws.amazon.com/singlesignon
+#    Click "Enable"
+#
+#    This creates your IdC instance and gives you:
+#    - Start URL: https://d-xxxxxxxxxx.awsapps.com/start
+#    - Identity source: (default) Identity Center directory
 ```
 
 #### Step 2: Connect Your IdP via SAML
 
 **Option A: External IdP (Okta, Azure AD, Auth0)**
 
-Follow your IdP-specific guide:
-- **Okta:** [providers/okta-setup.md](providers/okta-setup.md) *(coming soon)*
-- **Azure AD:** [providers/microsoft-entra-id-setup.md](providers/microsoft-entra-id-setup.md) *(coming soon)*
-- **Auth0:** [providers/auth0-setup.md](providers/auth0-setup.md) *(coming soon)*
+Follow AWS IdC setup guides for your identity provider:
+- [Okta](https://docs.aws.amazon.com/singlesignon/latest/userguide/gs-okta.html)
+- [EntraID](https://docs.aws.amazon.com/singlesignon/latest/userguide/gs-entra.html)
+- [Auth0 and others](https://docs.aws.amazon.com/singlesignon/latest/userguide/manage-your-identity-source-idp.html)
 
 **Option B: Identity Center Directory (Built-in)**
 
 If you don't have an external IdP:
 
-1. In IdC console, go to **Settings** → **Identity source**
+1. In IdC console, go to **Settings** -> **Identity source**
 2. Default: **Identity Center directory** (AWS-managed user directory)
-3. Click **Users** → **Add user**
+3. Click **Users** -> **Add user**
 4. Create test user for validation
-5. Click **Groups** → **Create group**
+5. Click **Groups** -> **Create group**
 6. Name: `Codex-Developers`
 7. Add users to group
 
-#### Step 3: Deploy Infrastructure
+#### Step 3: Deploy the Bedrock Auth Stack
 
-```bash
-# 1. Run wizard
-cd source/
-uv sync
-uv run cxwb init
+Follow [Path A, Step 2](#step-2-deploy-the-bedrock-auth-stack) above.
 
-# Select: IAM Identity Center path
-# Answer prompts with your IdC details from Step 1
+#### Step 4: Create the Permission Set
 
-# 2. Deploy stack
-uv run cxwb deploy --profile codex-bedrock
+Follow [Path A, Step 3](#step-3-create-the-permission-set-in-iam-identity-center) above.
 
-# 3. Create permission set (see "AWS Console Steps" in Path A above)
+#### Step 5: Distribute Configuration
 
-# 4. Generate developer bundle
-uv run cxwb distribute --profile codex-bedrock --bucket my-bucket
-```
+Follow [Path A, Step 4](#step-4-distribute-configuration-to-developers) above.
 
 ---
 
-## Manual Deployment (Without `cxwb` Wizard)
+## Developer Configuration
 
-**If you prefer manual CloudFormation deployment:**
+Each developer needs two configuration snippets: an AWS CLI profile that uses SSO, and a Codex `config.toml` that points at Amazon Bedrock.
 
-### Step 1: Deploy Bedrock Auth Stack
+### AWS CLI Profile (`~/.aws/config`)
 
-```bash
-# Set variables
-AWS_REGION=us-west-2              # Bedrock region
-STACK_NAME=codex-bedrock-idc
-TEMPLATE_FILE=deployment/infrastructure/bedrock-auth-idc.yaml
+Append the following block to `~/.aws/config`. Replace placeholder values from the admin's distribution.
 
-# Deploy CloudFormation
-aws cloudformation deploy \
-  --stack-name "$STACK_NAME" \
-  --template-file "$TEMPLATE_FILE" \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --region "$AWS_REGION" \
-  --parameter-overrides \
-      BedrockRegion="$AWS_REGION"
+```ini
+[sso-session codex-bedrock-sso]
+sso_start_url = https://d-xxxxxxxxxx.awsapps.com/start
+sso_region = us-east-1
+sso_registration_scopes = sso:account:access
 
-# Wait for completion (2-3 minutes)
-aws cloudformation wait stack-create-complete \
-  --stack-name "$STACK_NAME" \
-  --region "$AWS_REGION"
-
-# Get outputs
-aws cloudformation describe-stacks \
-  --stack-name "$STACK_NAME" \
-  --region "$AWS_REGION" \
-  --query 'Stacks[0].Outputs'
-
-# Note the PolicyArn output
+[profile codex-bedrock]
+sso_session = codex-bedrock-sso
+sso_account_id = 123456789012
+sso_role_name = CodexBedrockUser
+region = us-west-2
 ```
 
-**Stack creates:**
-- IAM Role: `BedrockCognitoFederatedRole`
-- IAM Policy: `CodexBedrockPolicy` (scoped to `bedrock:InvokeModel`)
-- Trust relationship: Trusted by `sso.amazonaws.com`
+### Codex Configuration (`~/.codex/config.toml`)
 
-### Step 2: Create Permission Set
+Append the following block to `~/.codex/config.toml`. The Bedrock provider uses the AWS SDK credential chain, so the `profile` value must match the `[profile ...]` name in `~/.aws/config`.
 
-See "AWS Console Steps" in Path A above.
+```toml
+model_provider = "amazon-bedrock"
+model = "openai.gpt-5.4"
 
-### Step 3: Generate Developer Bundle
-
-```bash
-cd deployment/scripts/
-
-./generate-codex-sso-config.sh \
-  --start-url https://d-xxxxxxxxxx.awsapps.com/start \
-  --sso-region us-east-1 \
-  --account-id 123456789012 \
-  --permission-set CodexBedrockUser \
-  --bedrock-region us-west-2 \
-  --profile-name codex-bedrock \
-  --model openai.gpt-5.4 \
-  --outdir ./codex-sso-config
-
-# Optional: Add OTel monitoring
-# --otel-endpoint http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com
+[model_providers.amazon-bedrock.aws]
+region = "us-west-2"
+profile = "codex-bedrock"
 ```
 
-### Step 4: Distribute to Developers
+For advanced Codex configuration options (model parameters, sandbox modes, custom providers), see the [OpenAI Codex configuration reference](https://developers.openai.com/codex/config-advanced).
 
-**Option 1: Manual sharing**
-```bash
-zip -r codex-sso-config.zip codex-sso-config/
-# Email or share via internal file sharing
-```
-
-**Option 2: S3 presigned URLs**
-```bash
-aws s3 cp codex-sso-config.zip s3://my-bucket/codex-sso-config.zip
-aws s3 presign s3://my-bucket/codex-sso-config.zip --expires-in 604800
-# Share URL (valid 7 days)
-```
-
-**Option 3: Self-service landing page**
-
-See [distribution/landing-page.md](distribution/landing-page.md) *(coming soon)*
-
----
-
-## Developer Installation
-
-**Developers receive the bundle and run:**
+### Authenticate and Launch
 
 ```bash
-# 1. Extract bundle
-# The zip name matches the admin's profile: <profile-name>-config.zip
-unzip <profile-name>-config.zip
-cd <profile-name>-config/
-
-# 2. Run installer
-./install.sh
-
-# This script:
-# - Installs codex-sso-creds to ~/.local/bin/
-# - Appends managed blocks to ~/.aws/config
-# - Appends managed blocks to ~/.codex/config.toml
-# - Creates backups of modified files
-
-# 3. Authenticate with IdC
+# 1. Sign in via Identity Center (browser opens)
 aws sso login --profile codex-bedrock
 
-# Browser opens → User logs in with corporate credentials
-# Token cached for 8-12 hours (session duration)
-
-# 4. Verify access
+# 2. Verify access
 aws sts get-caller-identity --profile codex-bedrock
 
 # Expected output:
@@ -297,26 +275,11 @@ aws sts get-caller-identity --profile codex-bedrock
 #   "Arn": "arn:aws:sts::123456789012:assumed-role/AWSReservedSSO_CodexBedrockUser_.../user@company.com"
 # }
 
-# 5. Launch Codex
+# 3. Launch Codex
 codex
-
-# Codex reads ~/.codex/config.toml:
-# - model_provider = "amazon-bedrock"
-# - model = "openai.gpt-5.4"
-# - region = "us-west-2"
-# - profile = "codex-bedrock"
-
-# Codex uses AWS SDK → reads ~/.aws/config:
-# - [profile codex-bedrock]
-# - credential_process = ~/.local/bin/codex-sso-creds ...
-
-# codex-sso-creds:
-# - Checks if SSO token is valid
-# - If expired → runs `aws sso login` (browser opens)
-# - Returns AWS credentials to Codex
-
-# Codex makes Bedrock API call with SigV4 signing
 ```
+
+Codex reads `~/.codex/config.toml`, picks up the `amazon-bedrock` provider, and uses the AWS SDK to load credentials from the `codex-bedrock` profile. When the SSO token expires, `aws sso login` refreshes it.
 
 ---
 
@@ -325,24 +288,25 @@ codex
 ### Test Authentication
 
 ```bash
-# 1. Check SSO token is valid
+# 1. Refresh SSO token
 aws sso login --profile codex-bedrock
 
-# 2. Get temporary credentials
+# 2. Inspect temporary credentials (optional)
 aws configure export-credentials --profile codex-bedrock --format process | jq
 
-# Expected output:
+# Expected output (truncated):
 # {
 #   "Version": 1,
 #   "AccessKeyId": "ASIA...",
 #   "SecretAccessKey": "...",
 #   "SessionToken": "...",
-#   "Expiration": "2026-05-11T18:30:00Z"
+#   "Expiration": "2026-05-30T18:30:00Z"
 # }
 
-# 3. Test Bedrock access
+# 3. Test Bedrock access directly (uses gpt-oss-20b via standard InvokeModel to confirm IAM is wired up)
 aws bedrock-runtime invoke-model \
-  --model-id openai.gpt-5.4 \
+  --model-id openai.gpt-oss-20b-1:0 \
+  --cli-binary-format raw-in-base64-out \
   --body '{"messages":[{"role":"user","content":"Hello"}],"max_tokens":10}' \
   --region us-west-2 \
   --profile codex-bedrock \
@@ -354,20 +318,22 @@ cat output.json | jq
 ### Test Codex Integration
 
 ```bash
-# 1. Check Codex config
-cat ~/.codex/config.toml | grep -A5 "model_provider"
+# 1. Confirm the Codex config block is present
+grep -A6 "model_provider" ~/.codex/config.toml
 
 # Expected:
 # model_provider = "amazon-bedrock"
 # model = "openai.gpt-5.4"
+# 
 # [model_providers.amazon-bedrock.aws]
 # region = "us-west-2"
 # profile = "codex-bedrock"
 
-# 2. Run Codex test prompt
-echo "Create a hello world function in Python" | codex
+# 2. Run a Codex test prompt
+codex exec --skip-git-repo-check --sandbox read-only "Write a hello world function in Python"
 
 # Expected: Codex generates Python code using Bedrock
+# Note: gpt-oss models emit a reasoning trace before the answer — this is expected.
 ```
 
 ---
@@ -376,47 +342,70 @@ echo "Create a hello world function in Python" | codex
 
 **If you want CloudWatch dashboards for usage tracking:**
 
-### Step 1: Deploy OTel Stack
+### Step 1: Deploy the Networking Stack
 
 ```bash
-cd deployment/scripts/
+AWS_REGION=us-west-2
+NETWORKING_STACK=codex-networking
 
-./deploy-otel-stack.sh \
-  --region us-west-2 \
-  --profile codex-bedrock
-
-# This deploys 3 stacks:
-# 1. codex-networking (VPC, subnets)
-# 2. codex-otel-collector (ECS Fargate + ALB)
-# 3. codex-otel-dashboard (CloudWatch dashboard)
-
-# Note the ALB URL from outputs:
-# http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com
+aws cloudformation deploy \
+  --stack-name "$NETWORKING_STACK" \
+  --template-file deployment/infrastructure/networking.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region "$AWS_REGION" \
+  --parameter-overrides \
+      VpcCidr=10.0.0.0/16
 ```
 
-### Step 2: Regenerate Bundle with OTel Endpoint
+### Step 2: Deploy the OTel Collector Stack
 
 ```bash
-cd deployment/scripts/
+OTEL_STACK=codex-otel-collector
 
-./generate-codex-sso-config.sh \
-  --start-url https://d-xxxxxxxxxx.awsapps.com/start \
-  --sso-region us-east-1 \
-  --account-id 123456789012 \
-  --permission-set CodexBedrockUser \
-  --bedrock-region us-west-2 \
-  --profile-name codex-bedrock \
-  --model openai.gpt-5.4 \
-  --otel-endpoint http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com \
-  --outdir ./codex-sso-config-with-otel
+# Pull VPC and subnet IDs from networking stack
+VPC_ID=$(aws cloudformation describe-stacks \
+  --stack-name "$NETWORKING_STACK" --region "$AWS_REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`VpcId`].OutputValue' --output text)
 
-# Redistribute new bundle to developers
+SUBNET_IDS=$(aws cloudformation describe-stacks \
+  --stack-name "$NETWORKING_STACK" --region "$AWS_REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`SubnetIds`].OutputValue' --output text)
+
+aws cloudformation deploy \
+  --stack-name "$OTEL_STACK" \
+  --template-file deployment/infrastructure/otel-collector.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --region "$AWS_REGION" \
+  --parameter-overrides \
+      VpcId="$VPC_ID" \
+      SubnetIds="$SUBNET_IDS"
+
+# Capture the collector ALB URL
+COLLECTOR_ENDPOINT=$(aws cloudformation describe-stacks \
+  --stack-name "$OTEL_STACK" --region "$AWS_REGION" \
+  --query 'Stacks[0].Outputs[?OutputKey==`CollectorEndpoint`].OutputValue' --output text)
+echo "$COLLECTOR_ENDPOINT"
 ```
 
-**What changes:**
-- `~/.codex/config.toml` now includes `[otel]` section
-- Codex automatically exports metrics to CloudWatch
-- View dashboard: CloudWatch → Dashboards → `CodexOnBedrock`
+### Step 3: Add the OTel Block to `~/.codex/config.toml`
+
+Append the following block. Substitute the collector endpoint captured above.
+
+```toml
+[otel.exporter.otlp-http]
+endpoint = "http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com/v1/logs"
+protocol = "binary"
+
+[otel.metrics_exporter.otlp-http]
+endpoint = "http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com/v1/metrics"
+protocol = "binary"
+
+[otel.trace_exporter.otlp-http]
+endpoint = "http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com/v1/traces"
+protocol = "binary"
+```
+
+Codex automatically exports metrics to the central collector, which forwards them to CloudWatch under the `LiteLLMGateway` namespace. View the dashboard under **CloudWatch -> Dashboards -> CodexOnBedrock** (deployed by the `codex-otel-dashboard` stack).
 
 ---
 
@@ -432,7 +421,7 @@ cd deployment/scripts/
 aws sso list-instances --region us-east-1 | jq
 
 # Check start URL in ~/.aws/config
-cat ~/.aws/config | grep sso_start_url
+grep sso_start_url ~/.aws/config
 ```
 
 ### Issue: "AccessDeniedException" when calling Bedrock
@@ -447,37 +436,29 @@ cat ~/.aws/config | grep sso_start_url
 
 ### Issue: Codex says "No credentials found"
 
-**Cause:** `credential_process` not configured correctly
+**Cause:** AWS profile is missing or `model_providers.amazon-bedrock.aws.profile` doesn't match
 
 **Fix:**
 ```bash
-# Check ~/.aws/config has credential_process directive
-cat ~/.aws/config | grep -A2 "profile codex-bedrock"
+# Confirm the profile exists in ~/.aws/config
+grep -A4 "profile codex-bedrock" ~/.aws/config
 
-# Expected:
-# [profile codex-bedrock]
-# region = us-west-2
-# credential_process = sh -c 'exec "$HOME/.local/bin/codex-sso-creds" ...'
-
-# Test credential_process manually
-sh -c 'exec "$HOME/.local/bin/codex-sso-creds" codex-bedrock-sso codex-bedrock' | jq
+# Confirm the Codex provider points at the same profile
+grep -A4 "model_providers.amazon-bedrock.aws" ~/.codex/config.toml
 ```
 
 ### Issue: Browser doesn't open for SSO login
 
-**Cause:** `codex-sso-creds` can't find AWS CLI
+**Cause:** AWS CLI not in PATH or default browser not detected
 
 **Fix:**
 ```bash
-# Check AWS CLI is in PATH
 which aws
 
-# If not found, install:
-# macOS: brew install awscli
-# Linux: sudo apt install awscli
-# Windows: winget install Amazon.AWSCLI
-
-# Or specify full path in codex-sso-creds script
+# Install AWS CLI v2 if missing:
+# macOS:    brew install awscli
+# Linux:    sudo apt install awscli
+# Windows:  winget install Amazon.AWSCLI
 ```
 
 ### More troubleshooting
@@ -491,34 +472,69 @@ See [operate-troubleshooting.md](operate-troubleshooting.md)
 **To remove the Native AWS Access deployment:**
 
 ```bash
-# 1. Developers uninstall locally
-./uninstall.sh
+# 1. Developers remove their managed config blocks
+#    - Delete the codex-bedrock profile and sso-session entry from ~/.aws/config
+#    - Delete the model_providers.amazon-bedrock block from ~/.codex/config.toml
+#    - rm -rf ~/.aws/sso/cache
 
-# This removes:
-# - ~/.local/bin/codex-sso-creds
-# - Managed blocks from ~/.aws/config
-# - Managed blocks from ~/.codex/config.toml
+# 2. Admin deletes the OTel and dashboard stacks (if deployed)
+#    Delete dashboards first (no dependents), then collector, then networking.
+#    Wait between dependent stacks — networking delete fails if collector VPC resources still exist.
+aws cloudformation delete-stack --stack-name codex-otel-dashboard --region us-west-2
+aws cloudformation delete-stack --stack-name codex-dashboard --region us-west-2
+aws cloudformation wait stack-delete-complete --stack-name codex-otel-dashboard --region us-west-2
+aws cloudformation wait stack-delete-complete --stack-name codex-dashboard --region us-west-2
+aws cloudformation delete-stack --stack-name codex-otel-collector --region us-west-2
+aws cloudformation wait stack-delete-complete --stack-name codex-otel-collector --region us-west-2
+aws cloudformation delete-stack --stack-name codex-networking --region us-west-2
+aws cloudformation wait stack-delete-complete --stack-name codex-networking --region us-west-2
 
-# 2. Admin deletes CloudFormation stack
+# 3. Admin removes the permission set
+#    Account assignments must be deleted before the permission set can be removed.
+#    Do this BEFORE deleting the auth stack — the stack delete will fail with
+#    DELETE_FAILED if the customer-managed policy is still attached to the permission set.
+IDC_INSTANCE_ARN=$(aws sso-admin list-instances --region us-east-1 \
+  --query 'Instances[0].InstanceArn' --output text)
+IDENTITY_STORE_ID=$(aws sso-admin list-instances --region us-east-1 \
+  --query 'Instances[0].IdentityStoreId' --output text)
+PS_ARN=$(aws sso-admin list-permission-sets --instance-arn "$IDC_INSTANCE_ARN" --region us-east-1 \
+  --query 'PermissionSets[]' --output text | while read arn; do
+    name=$(aws sso-admin describe-permission-set --instance-arn "$IDC_INSTANCE_ARN" \
+      --permission-set-arn "$arn" --region us-east-1 --query 'PermissionSet.Name' --output text 2>/dev/null)
+    [[ "$name" == "CodexBedrockUser" ]] && echo "$arn"
+  done)
+
+# Delete account assignments first (one per user/group assigned)
+aws sso-admin delete-account-assignment \
+  --instance-arn "$IDC_INSTANCE_ARN" \
+  --permission-set-arn "$PS_ARN" \
+  --target-id <AccountId> --target-type AWS_ACCOUNT \
+  --principal-type GROUP --principal-id <GroupId> \
+  --region us-east-1
+# Wait ~15 seconds for deletion to propagate, then delete the permission set
+sleep 15
+aws sso-admin delete-permission-set \
+  --instance-arn "$IDC_INSTANCE_ARN" \
+  --permission-set-arn "$PS_ARN" \
+  --region us-east-1
+
+# 4. Admin deletes the Bedrock auth stack
+#    Note: deploy region is us-east-1 (the IdC home region), not us-west-2
 aws cloudformation delete-stack \
   --stack-name codex-bedrock-idc \
-  --region us-west-2
-
-# 3. Admin removes permission set (optional)
-# In IdC console:
-# - Multi-account permissions → Permission sets
-# - Select CodexBedrockUser → Delete
+  --region us-east-1
+aws cloudformation wait stack-delete-complete \
+  --stack-name codex-bedrock-idc \
+  --region us-east-1
 ```
-
----
 
 ---
 
 ## Next Steps
 
-- **Add monitoring:** [Optional: Add Monitoring](#optional-add-monitoring-otel)
+- **Add monitoring:** [Optional: Add Monitoring (OTel)](#optional-add-monitoring-otel)
 - **Migrate to LLM Gateway:** [QUICKSTART_LLM_GATEWAY.md](QUICKSTART_LLM_GATEWAY.md)
-- **Scale to more users:** Distribute bundle via self-service landing page
+- **Scale to more users:** Distribute configuration via your existing internal docs portal or self-service tooling
 - **Monitor costs:** Set up CloudWatch alarms on Bedrock spend
 
 ---
@@ -526,5 +542,6 @@ aws cloudformation delete-stack \
 ## Support
 
 - **Documentation:** [../QUICKSTART.md](../QUICKSTART.md)
-- **Issues:** [GitHub Issues](https://github.com/aws-samples/guidance-for-codex-on-aws/issues)
+- **Issues:** [GitHub Issues](https://github.com/aws-samples/sample-openai-on-aws/issues)
+- **Codex configuration reference:** [OpenAI Codex docs](https://developers.openai.com/codex/config-advanced)
 - **Technical guide:** [deploy-identity-center.md](deploy-identity-center.md)

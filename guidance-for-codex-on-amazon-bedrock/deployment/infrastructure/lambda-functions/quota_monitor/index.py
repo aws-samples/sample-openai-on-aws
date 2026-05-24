@@ -587,11 +587,24 @@ ACTION REQUIRED
 -------------------------------------
 {"ACCESS IS BLOCKED until quota resets or admin unblocks." if enforcement == "block" and alert['alert_level'] == 'exceeded' else "User may soon exceed quota limit."}
 
-To temporarily unblock this user:
-  cxwb quota unblock {user_email} --duration 24h
+Remediation (operates on the QuotaPolicies DynamoDB table):
 
-To increase their quota:
-  cxwb quota set-user {user_email} --monthly-limit 500M
+  Switch this user's policy from "block" to "alert" (effectively unblocks):
+    aws dynamodb update-item \\
+      --table-name "$POLICIES_TABLE" \\
+      --key '{{"pk": {{"S": "user:{user_email}"}}, "sk": {{"S": "CURRENT"}}}}' \\
+      --update-expression "SET enforcement_mode = :mode" \\
+      --expression-attribute-values '{{":mode": {{"S": "alert"}}}}'
+
+  Raise this user's monthly limit to 500M tokens:
+    aws dynamodb update-item \\
+      --table-name "$POLICIES_TABLE" \\
+      --key '{{"pk": {{"S": "user:{user_email}"}}, "sk": {{"S": "CURRENT"}}}}' \\
+      --update-expression "SET monthly_token_limit = :n, policy_type = :t, identifier = :i" \\
+      --expression-attribute-values '{{":n": {{"N": "500000000"}}, ":t": {{"S": "user"}}, ":i": {{"S": "{user_email}"}}}}'
+
+  ($POLICIES_TABLE is set on the quota-monitor Lambda; read it from the
+   stack outputs or `aws lambda get-function-configuration`.)
 
 =====================================
 This alert is sent once per threshold level per month.
@@ -625,11 +638,21 @@ ACTION REQUIRED
 -------------------------------------
 {"ACCESS IS BLOCKED until daily quota resets at UTC midnight or admin unblocks." if enforcement == "block" and alert['alert_level'] == 'exceeded' else "User may soon exceed daily quota limit."}
 
-To temporarily unblock this user:
-  cxwb quota unblock {user_email} --duration 24h
+Remediation (operates on the QuotaPolicies DynamoDB table):
 
-To increase their daily quota:
-  cxwb quota set-user {user_email} --daily-limit 20M
+  Switch this user's policy from "block" to "alert" (effectively unblocks):
+    aws dynamodb update-item \\
+      --table-name "$POLICIES_TABLE" \\
+      --key '{{"pk": {{"S": "user:{user_email}"}}, "sk": {{"S": "CURRENT"}}}}' \\
+      --update-expression "SET enforcement_mode = :mode" \\
+      --expression-attribute-values '{{":mode": {{"S": "alert"}}}}'
+
+  Raise this user's daily limit to 20M tokens:
+    aws dynamodb update-item \\
+      --table-name "$POLICIES_TABLE" \\
+      --key '{{"pk": {{"S": "user:{user_email}"}}, "sk": {{"S": "CURRENT"}}}}' \\
+      --update-expression "SET daily_token_limit = :n, policy_type = :t, identifier = :i" \\
+      --expression-attribute-values '{{":n": {{"N": "20000000"}}, ":t": {{"S": "user"}}, ":i": {{"S": "{user_email}"}}}}'
 
 =====================================
 Daily quotas reset at UTC midnight.
