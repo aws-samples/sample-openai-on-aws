@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codex API Key - Self-Service Portal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .button:active {
+            transform: translateY(0);
+        }
+
+        .button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .result-container {
+            display: none;
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #28a745;
+        }
+
+        .result-container.show {
+            display: block;
+        }
+
+        .api-key {
+            font-family: 'Courier New', monospace;
+            background: #fff;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            word-break: break-all;
+            font-size: 14px;
+            margin: 15px 0;
+        }
+
+        .copy-button {
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        .copy-button:hover {
+            background: #218838;
+        }
+
+        .error-container {
+            display: none;
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8d7da;
+            border-radius: 8px;
+            border-left: 4px solid #dc3545;
+            color: #721c24;
+        }
+
+        .error-container.show {
+            display: block;
+        }
+
+        .loading {
+            display: none;
+            margin-top: 20px;
+            text-align: center;
+            color: #666;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .instructions {
+            margin-top: 20px;
+            padding: 15px;
+            background: #e7f3ff;
+            border-radius: 6px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .instructions h3 {
+            color: #0056b3;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .instructions code {
+            background: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            color: #e83e8c;
+        }
+
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Codex API Key Generator</h1>
+        <p class="subtitle">Self-service portal powered by your corporate SSO</p>
+
+        <button class="button" id="signInButton" onclick="authenticate()">
+            Sign in with SSO
+        </button>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Authenticating and generating your API key...</p>
+        </div>
+
+        <div class="error-container" id="error">
+            <strong>Error:</strong> <span id="errorMessage"></span>
+        </div>
+
+        <div class="result-container" id="result">
+            <h3>✅ Your API Key</h3>
+            <div class="api-key" id="apiKey"></div>
+            <button class="copy-button" onclick="copyToClipboard()">Copy to Clipboard</button>
+
+            <div class="warning">
+                <strong>⚠️ Important:</strong> Save this key securely. It will not be shown again!
+            </div>
+
+            <div class="instructions">
+                <h3>How to use your API key:</h3>
+                <p><strong>1. Set environment variable:</strong></p>
+                <code>export OPENAI_API_KEY="your-api-key-here"</code>
+
+                <p style="margin-top: 10px;"><strong>2. Add to shell profile for persistence:</strong></p>
+                <code># macOS: echo 'export OPENAI_API_KEY="..."' >> ~/.zshrc</code><br>
+                <code># Linux: echo 'export OPENAI_API_KEY="..."' >> ~/.bashrc</code>
+
+                <p style="margin-top: 10px;"><strong>3. Use with Codex or any OpenAI-compatible client</strong></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const GATEWAY_URL = window.location.origin;
+
+        function authenticate() {
+            // Check if we're returning from IdP with JWT in URL hash
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            const accessToken = params.get('access_token') || params.get('id_token');
+
+            if (accessToken) {
+                // We have a JWT token from IdP callback
+                fetchApiKey(accessToken);
+            } else {
+                // Need to redirect to IdP for authentication
+                // This is a simplified example - actual OAuth2 flow requires:
+                // 1. IdP configuration (client ID, redirect URI)
+                // 2. State parameter for CSRF protection
+                // 3. PKCE for enhanced security
+
+                showError('OAuth2 redirect not configured. Contact your administrator to set up IdP integration.');
+
+                // Example redirect (commented out - needs actual IdP configuration):
+                // const redirectUri = encodeURIComponent(window.location.origin + window.location.pathname);
+                // const idpUrl = `https://your-tenant.okta.com/oauth2/authorize?` +
+                //     `client_id=YOUR_CLIENT_ID&` +
+                //     `response_type=token&` +
+                //     `scope=openid%20email%20profile&` +
+                //     `redirect_uri=${redirectUri}`;
+                // window.location.href = idpUrl;
+            }
+        }
+
+        async function fetchApiKey(jwtToken) {
+            document.getElementById('signInButton').style.display = 'none';
+            document.getElementById('loading').classList.add('show');
+            document.getElementById('error').classList.remove('show');
+            document.getElementById('result').classList.remove('show');
+
+            try {
+                const response = await fetch(`${GATEWAY_URL}/api/my-key`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${jwtToken}`,
+                        'Content-Type': 'application/json',
+                    },
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.api_key) {
+                    // Success - show API key
+                    document.getElementById('apiKey').textContent = data.api_key;
+                    document.getElementById('result').classList.add('show');
+
+                    // Clear URL hash to prevent accidental token exposure
+                    window.history.replaceState(null, null, window.location.pathname);
+                } else {
+                    throw new Error(data.error || 'Failed to generate API key');
+                }
+            } catch (error) {
+                showError(error.message);
+                document.getElementById('signInButton').style.display = 'block';
+            } finally {
+                document.getElementById('loading').classList.remove('show');
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('error').classList.add('show');
+        }
+
+        function copyToClipboard() {
+            const apiKey = document.getElementById('apiKey').textContent;
+            navigator.clipboard.writeText(apiKey).then(() => {
+                const button = event.target;
+                const originalText = button.textContent;
+                button.textContent = '✓ Copied!';
+                button.style.background = '#218838';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.style.background = '#28a745';
+                }, 2000);
+            }).catch(err => {
+                alert('Failed to copy: ' + err);
+            });
+        }
+
+        // Check if we're returning from IdP (JWT in URL hash)
+        if (window.location.hash.includes('access_token') || window.location.hash.includes('id_token')) {
+            authenticate();
+        }
+    </script>
+</body>
+</html>

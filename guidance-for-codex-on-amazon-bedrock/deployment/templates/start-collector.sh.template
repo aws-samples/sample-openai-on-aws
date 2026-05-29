@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Start local OTEL collector for Codex monitoring
+# This script is generated during bundle installation
+
+set -euo pipefail
+
+COLLECTOR_DIR="$HOME/.codex/otel"
+COLLECTOR_BIN="$COLLECTOR_DIR/otelcol-local"
+COLLECTOR_CONFIG="$COLLECTOR_DIR/otel-config.yaml"
+COLLECTOR_PID="$COLLECTOR_DIR/otelcol.pid"
+COLLECTOR_LOG="$COLLECTOR_DIR/otelcol.log"
+
+if [[ ! -f "$COLLECTOR_BIN" ]]; then
+  echo "Error: Collector binary not found at $COLLECTOR_BIN"
+  echo "Run ./install.sh first"
+  exit 1
+fi
+
+if [[ -f "$COLLECTOR_PID" ]] && kill -0 "$(cat "$COLLECTOR_PID")" 2>/dev/null; then
+  echo "✓ Collector already running (PID $(cat "$COLLECTOR_PID"))"
+  exit 0
+fi
+
+echo "Starting OTEL collector..."
+
+# Ensure AWS credentials are available
+if ! aws sts get-caller-identity &>/dev/null; then
+  echo "⚠  AWS credentials not found"
+  echo "Run: aws sso login --profile __AWS_PROFILE__"
+  exit 1
+fi
+
+# Start collector in background
+nohup "$COLLECTOR_BIN" --config "$COLLECTOR_CONFIG" \
+  > "$COLLECTOR_LOG" 2>&1 &
+
+COLLECTOR_PID_VALUE=$!
+echo "$COLLECTOR_PID_VALUE" > "$COLLECTOR_PID"
+
+# Wait for health check
+sleep 2
+
+if kill -0 "$COLLECTOR_PID_VALUE" 2>/dev/null; then
+  echo "✓ OTEL collector started (PID $COLLECTOR_PID_VALUE)"
+  echo "  Sending metrics to: CloudWatch (region: __AWS_REGION__)"
+  echo "  Logs: $COLLECTOR_LOG"
+  echo ""
+  echo "Check status: $COLLECTOR_DIR/collector-status.sh"
+  echo "Stop: $COLLECTOR_DIR/stop-collector.sh"
+else
+  echo "✗ Failed to start collector"
+  echo "Check logs: $COLLECTOR_LOG"
+  rm -f "$COLLECTOR_PID"
+  exit 1
+fi

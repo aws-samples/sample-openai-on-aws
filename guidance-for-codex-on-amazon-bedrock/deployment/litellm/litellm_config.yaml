@@ -1,0 +1,51 @@
+model_list:
+  # OpenAI OSS models via Bedrock (primary — for Codex)
+  - model_name: gpt-4o
+    litellm_params:
+      model: bedrock/openai.gpt-oss-safeguard-120b
+      aws_region_name: os.environ/AWS_REGION
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: bedrock/openai.gpt-oss-safeguard-20b
+      aws_region_name: os.environ/AWS_REGION
+
+  - model_name: gpt-oss-120b
+    litellm_params:
+      model: bedrock/openai.gpt-oss-120b-1:0
+      aws_region_name: os.environ/AWS_REGION
+
+  - model_name: gpt-oss-20b
+    litellm_params:
+      model: bedrock/openai.gpt-oss-20b-1:0
+      aws_region_name: os.environ/AWS_REGION
+
+  - model_name: gpt-oss-safeguard-120b
+    litellm_params:
+      model: bedrock/openai.gpt-oss-safeguard-120b
+      aws_region_name: os.environ/AWS_REGION
+
+  - model_name: gpt-oss-safeguard-20b
+    litellm_params:
+      model: bedrock/openai.gpt-oss-safeguard-20b
+      aws_region_name: os.environ/AWS_REGION
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+  # JWT/OIDC authentication (LiteLLM Enterprise only)
+  # Uncomment to enable when running LiteLLM Enterprise.
+  # For local testing, use LITELLM_MASTER_KEY as the Bearer token instead.
+  # Set JWT_PUBLIC_KEY_URL env var to your IdP's JWKS endpoint.
+  #
+  # enable_jwt_auth: true
+  # litellm_jwtauth:
+  #   user_id_jwt_field: "sub"
+  #   user_email_jwt_field: "email"
+  #   team_ids_jwt_field: "groups"  # array claim — maps IdP groups to LiteLLM teams
+  #   public_key_ttl: 600           # cache JWKS for 10 minutes
+
+litellm_settings:
+  set_verbose: false
+  drop_params: true               # silently drop unsupported OpenAI params
+  # callbacks: ["otel"]           # uncomment + set OTEL_ENDPOINT env var if you wire up an OTel collector

@@ -1,0 +1,62 @@
+services:
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml:ro
+    # Use the EC2 instance metadata endpoint for AWS credentials.
+    # The container inherits the host's IAM role — no static keys needed.
+    extra_hosts:
+      - "169.254.169.254:169.254.169.254"
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://litellm:litellm@db:5432/litellm}
+      OTEL_EXPORTER: ${OTEL_EXPORTER:-otlp_http}
+      # Local: point at the local otel-collector container
+      # Production: point at the deployed ALB endpoint from the otel-collector stack
+      # e.g. http://codex-otel-alb-xxxx.us-east-1.elb.amazonaws.com
+      OTEL_ENDPOINT: ${OTEL_ENDPOINT:-http://otel-collector:4318}
+      # SSO — Generic OIDC provider (Cognito, Okta, Azure AD, Auth0, etc.)
+      # See .env.example for configuration. Requires LiteLLM Enterprise.
+      PROXY_BASE_URL: ${PROXY_BASE_URL:-http://localhost:4000}
+      GENERIC_CLIENT_ID: ${GENERIC_CLIENT_ID:-}
+      GENERIC_CLIENT_SECRET: ${GENERIC_CLIENT_SECRET:-none}
+      GENERIC_AUTHORIZATION_ENDPOINT: ${GENERIC_AUTHORIZATION_ENDPOINT:-}
+      GENERIC_TOKEN_ENDPOINT: ${GENERIC_TOKEN_ENDPOINT:-}
+      GENERIC_USERINFO_ENDPOINT: ${GENERIC_USERINFO_ENDPOINT:-}
+      GENERIC_REDIRECT_URI: ${GENERIC_REDIRECT_URI:-http://localhost:4000/sso/callback}
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: litellm
+      POSTGRES_DB: litellm
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Local OTel collector — logs spans to stdout for testing.
+  # In production, set OTEL_ENDPOINT to the deployed collector ALB instead
+  # and remove this service (or keep it for local-only use).
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    ports:
+      - "4317:4317"   # gRPC
+      - "4318:4318"   # HTTP
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml:ro
+
+volumes:
+  postgres_data:
