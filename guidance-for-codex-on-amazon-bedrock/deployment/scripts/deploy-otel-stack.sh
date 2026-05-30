@@ -237,6 +237,7 @@ aws cloudformation deploy \
   --template-file "$infra_dir/codex-otel-dashboard.yaml" \
   --parameter-overrides \
       DashboardName="$dashboard_name" \
+      MetricsRegion="$region" \
       InputTokenPriceUsdPerMillion="$input_price" \
       OutputTokenPriceUsdPerMillion="$output_price" \
       CachedInputTokenPriceUsdPerMillion="$cached_input_price" \

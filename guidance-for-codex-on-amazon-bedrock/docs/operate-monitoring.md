@@ -19,8 +19,8 @@ Corporate IdP (EntraID / Okta / …)
             │              └── Per-user / per-team spend ← source of truth
             └── Codex OTel exporter (x-user-id header, install-time baked)
                  └── ADOT collector on ECS Fargate
-                      └── CloudWatch EMF metrics (user.id dimension)
-                           └── Per-user / per-team usage dashboard + quotas
+                      └── CloudWatch OTLP metrics (user.id resource attribute)
+                           └── PromQL dashboard + quota alerts
 ```
 
 Single identity, two dashboards. The Gateway path splits this into two
@@ -35,7 +35,7 @@ This diagram is the canonical version. Other docs link here; do not copy.
 
 | Layer | Purpose | Latency | Storage | Authority |
 |---|---|---|---|---|
-| **Live dashboards + quota alerts** | "What is happening now. Who is over budget." | ~60s | CloudWatch Metrics + Logs | Usage only |
+| **Live dashboards + quota alerts** | "What is happening now. Who is over budget." | ~60s | CloudWatch OTLP metrics | Usage only |
 | **Cost attribution** | "What each user or team cost this month." | ~24h | CUR 2.0 on S3 | Billing-grade |
 | **Deep historical analytics** (optional) | Arbitrary SQL over months of token-level data. | ~5min | S3 Parquet + Athena | Usage only |
 
@@ -53,14 +53,15 @@ counts, TPM/RPM spikes, session-duration studies).
 
 - **OTel collector** (ECS Fargate, `otel-collector.yaml`) behind an ALB.
   Receives OTLP/HTTP, maps the `x-user-id` header → `user.id` resource
-  attribute, exports EMF to CloudWatch namespace `Codex`.
+  attribute, and exports to CloudWatch native OTLP with SigV4 authentication.
+  When `EnableAnalytics=true`, it also writes EMF logs to `/aws/codex/metrics`
+  for downstream SQL analytics.
 - **CloudWatch dashboard** `CodexOnBedrock` (`codex-otel-dashboard.yaml`) —
-  per-user token spend estimate, API error rate, turn latency, session-source
-  mix, active-developer leaderboard.
+  PromQL widgets for per-user token spend estimate, API error rate, turn
+  latency, session-source mix, and active-developer usage.
 
-End users emit metrics automatically once their generated `~/.codex/config.toml`
-ships with an `[otel]` block pointing at your collector (the generator embeds
-this — see `deploy-identity-center.md` §5).
+End users emit metrics once `~/.codex/config.toml` has OTLP exporter blocks
+pointing at your collector endpoint and stamping the user's identity headers.
 
 ### Metrics Codex actually emits
 
@@ -175,6 +176,9 @@ suffice; enable this pipeline only when you have a specific query that requires 
 A CloudFormation template for this pipeline is not shipped in this repository —
 build it when the need is concrete.
 
+The EMF log stream is not created by the default collector deployment. Set
+`EnableAnalytics=true` on `otel-collector.yaml` only when you need this layer.
+
 ---
 
 ## LLM Gateway path caveat
@@ -201,17 +205,20 @@ reference setup and its telemetry configuration.
 
 After deploying the OTel stack and generating developer configs:
 
-1. **Metric lands in CloudWatch.** `aws logs tail /aws/codex/metrics
-   --region us-west-2 --follow` should show EMF events with `user.id`
-   dimensions within ~60s of a Codex call.
+1. **Metric lands in CloudWatch.** CloudWatch Metrics Explorer or a PromQL
+   widget should show `codex.turn.token_usage` with `user.id` attribution
+   within ~60s of a Codex call.
 2. **Dashboard renders per-user.** Open the `CodexOnBedrock` dashboard;
-   "Estimated token spend per user" bar chart should show at least one
+   "Estimated Spend by Developer" widget should show at least one
    user after a real session.
-3. **CloudTrail logs the SSO username.** `aws cloudtrail lookup-events
+3. **Analytics EMF logs exist when enabled.** If you deployed the collector
+   with `EnableAnalytics=true`, `aws logs tail /aws/codex/metrics --region
+   us-west-2 --follow` should show EMF events with `user.id` dimensions.
+4. **CloudTrail logs the SSO username.** `aws cloudtrail lookup-events
    --lookup-attributes AttributeKey=EventName,AttributeValue=InvokeModel
    --region us-west-2` — `userIdentity.principalId` should contain the
    SSO email after the `/`.
-4. **CUR principal column populates.** Up to 24h after the first invoke,
+5. **CUR principal column populates.** Up to 24h after the first invoke,
    `line_item_iam_principal` in your CUR 2.0 export should contain the
    same SSO email.
 

@@ -342,6 +342,15 @@ codex exec --skip-git-repo-check --sandbox read-only "Write a hello world functi
 
 **If you want CloudWatch dashboards for usage tracking:**
 
+The simplest path is the end-to-end helper:
+
+```bash
+deployment/scripts/deploy-otel-stack.sh --region us-west-2
+```
+
+It deploys networking, the central collector, and the PromQL CloudWatch
+dashboard. The manual steps below show the same collector deployment pieces.
+
 ### Step 1: Deploy the Networking Stack
 
 ```bash
@@ -405,7 +414,11 @@ endpoint = "http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com/v1/traces"
 protocol = "binary"
 ```
 
-Codex automatically exports metrics to the central collector, which forwards them to CloudWatch under the `LiteLLMGateway` namespace. View the dashboard under **CloudWatch -> Dashboards -> CodexOnBedrock** (deployed by the `codex-otel-dashboard` stack).
+Codex exports metrics to the central collector, which forwards them to
+CloudWatch native OTLP. View the PromQL dashboard under **CloudWatch ->
+Dashboards -> CodexOnBedrock** after deploying `codex-otel-dashboard.yaml` or
+using `deployment/scripts/deploy-otel-stack.sh`. EMF logs in `/aws/codex/metrics`
+are optional and require `EnableAnalytics=true` on the collector stack.
 
 ---
 

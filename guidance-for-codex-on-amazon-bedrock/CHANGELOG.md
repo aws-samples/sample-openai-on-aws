@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+- Updated Codex monitoring guidance to use CloudWatch native OTLP as the default
+  collector export path, with EMF logs enabled only for optional analytics.
+- Reworked the Codex OTEL dashboard to use native CloudWatch PromQL widgets
+  over OTLP-ingested metrics instead of classic namespace searches and Logs
+  widgets.
+- Clarified monitoring docs, troubleshooting, and infrastructure reference
+  around OTLP-first dashboards, `EnableAnalytics=true`, and the default `Codex`
+  EMF namespace.
+
 ## [2.0.0] - 2026-05-23
 
 ### BREAKING CHANGES

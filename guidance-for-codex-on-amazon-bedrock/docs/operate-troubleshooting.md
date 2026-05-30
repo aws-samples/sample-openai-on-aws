@@ -91,15 +91,18 @@ regardless of how you deployed.
 
 ## Observability (OTel → CloudWatch)
 
-### No metrics in `/aws/codex/metrics` after a Codex session
+### No Codex metrics in CloudWatch after a Codex session
 - **Checklist:**
   1. `curl <collector-alb>/v1/metrics` with an `x-user-id` header — does the
      synthetic POST arrive? If not, the collector or networking is broken.
-  2. Verify that `~/.codex/config.toml` has an `[otel.exporter.otlp-http]`
-     block with the *full* URL (Codex does not append `/v1/<signal>`).
+  2. Verify that `~/.codex/config.toml` has an `[otel.metrics_exporter.otlp-http]`
+     block with the *full* `/v1/metrics` URL.
   3. Verify Codex version ≥ 0.130 — older versions emit a different
      set of metric names than `otel-collector.yaml` declares.
   4. Wait at least 60 seconds — the batch processor flushes on an interval.
+  5. If you are checking `/aws/codex/metrics`, confirm the collector stack was
+     deployed with `EnableAnalytics=true`; the default path exports only to
+     CloudWatch native OTLP for PromQL dashboards.
 
 ### Metrics land but `user.id` dimension is empty or shows incorrect value
 - **Cause:** The `x-user-id` header in `~/.codex/config.toml` was not set or
@@ -109,8 +112,8 @@ regardless of how you deployed.
   `aws sts get-caller-identity --profile codex --query Arn --output text`
   (the SSO username follows the final `/` in the assumed-role ARN).
 
-### Collector logs show `404` on `/v1/logs` or `/v1/traces`
-- **Cause:** Codex emits logs and traces alongside metrics; the collector
-  needs `nop`-exporter pipelines for those signals so clients do not retry
-  on 4xx responses. If you see this, redeploy with the current
-  `otel-collector.yaml`.
+### Dashboard is empty but collector metrics exist
+- **Cause:** The dashboard queries OTLP-ingested metrics with PromQL, filtered
+  on Codex resource attributes.
+- **Fix:** Confirm the dashboard `MetricsRegion` matches the collector region
+  and that Codex is emitting `service.name=codex_cli_rs`.

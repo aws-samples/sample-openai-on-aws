@@ -53,10 +53,10 @@ users.
 | Template                       | Purpose                                                                  |
 | ------------------------------ | ------------------------------------------------------------------------ |
 | `networking.yaml`              | VPC, two public subnets, IGW for the OTel collector.                     |
-| `otel-collector.yaml`          | ADOT Collector on ECS Fargate (OTLP → CloudWatch metrics).               |
+| `otel-collector.yaml`          | ADOT Collector on ECS Fargate (OTLP → CloudWatch native OTLP; optional EMF when analytics is enabled). |
 | `metrics-aggregation.yaml`     | **Optional / advanced.** Lambda + EventBridge that rolls log-derived metrics into CloudWatch and (with the bundled `quota_monitor` Lambda) emits SNS alerts off a `QuotaPolicies` DynamoDB table. Most deployments should rely on **gateway-native quotas** (LiteLLM `/key/generate` budgets, Portkey budget limits, Kong rate-limiting plugins) instead — see `docs/QUICKSTART_LLM_GATEWAY.md` § Quota Enforcement. Use this stack only if you need policies the gateway can't express. |
 | `codex-dashboard.yaml`         | CloudWatch dashboard with embedded custom-widget Lambdas (logs-based). **Requires packaging** — run `aws cloudformation package` before `deploy`, and the S3 artifacts bucket must be in the same region as the stack (see `s3bucket.yaml`). |
-| `codex-otel-dashboard.yaml`    | CloudWatch dashboard sourced from OTel-emitted metrics (per-user usage, errors, spend). No Lambda code — deploys directly with `aws cloudformation deploy`. |
+| `codex-otel-dashboard.yaml`    | CloudWatch PromQL dashboard sourced from OTLP-ingested metrics (per-user usage, errors, spend). No Lambda code — deploys directly with `aws cloudformation deploy`. |
 | `litellm-dashboard.yaml`       | CloudWatch dashboard for the LiteLLM gateway.                            |
 
 ### Artifacts
@@ -153,7 +153,7 @@ Outputs (all exported): `VpcId`, `PublicSubnet1`, `PublicSubnet2`,
 | `VpcId`              | String             | —                                                | Required. Pass via `!ImportValue` from the networking stack. |
 | `SubnetIds`          | CommaDelimitedList | —                                                | At least 2 subnets (ALB requirement). |
 | `CollectorImage`     | String             | `public.ecr.aws/aws-observability/aws-otel-collector:latest` | ADOT image. |
-| `MetricsNamespace`   | String             | `LiteLLMGateway`                                 | CloudWatch metrics namespace. |
+| `MetricsNamespace`   | String             | `Codex`                                          | CloudWatch EMF namespace used only when `EnableAnalytics=true`. |
 | `CustomDomainName`   | String             | `''`                                             | Empty → ALB DNS over HTTP. Provide a domain to enable HTTPS. |
 | `HostedZoneId`       | String             | `''`                                             | Required when `CustomDomainName` is set. |
 | `OidcIssuerUrl`      | String             | `''`                                             | Optional: enable ALB JWT validation. |
@@ -163,7 +163,8 @@ Outputs (all exported): `VpcId`, `PublicSubnet1`, `PublicSubnet2`,
 
 Outputs: `VpcId`, `SubnetIds`, `CollectorEndpoint` (exported as
 `${StackName}-endpoint`), `ALBEndpoint` (exported as `${StackName}-alb-dns`),
-`ConfigParameterName`, `LogGroupName`, `Note`.
+`ConfigParameterName`, `Note`, and `LogGroupName` only when analytics is
+enabled.
 
 ### `litellm-ecs.yaml` (in `deployment/litellm/ecs/`)
 

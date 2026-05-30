@@ -232,7 +232,9 @@ stack first**, then add an `[otel]` block to each developer's
 `~/.codex/config.toml` pointing at the collector's ALB endpoint and stamping
 the developer's SSO identity as the `x-user-id` header. The collector
 (`deployment/infrastructure/otel-collector.yaml`) extracts that header into a
-CloudWatch `user.id` dimension.
+CloudWatch `user.id` resource attribute and sends metrics to CloudWatch native
+OTLP. The dashboard queries those OTLP metrics with PromQL. EMF logs under
+`/aws/codex/metrics` are emitted only when `EnableAnalytics=true`.
 
 ### 1. Deploy the collector stack
 
@@ -252,6 +254,10 @@ Useful flags:
 | `--stack-prefix` | Rename the three stacks (default `codex-otel`). |
 | `--dashboard-name` | CloudWatch dashboard name (default `CodexOnBedrock`). |
 | `--input-price` / `--output-price` / `--cached-input-price` | Per-1M-token USD for the dashboard's spend-estimate widgets. Defaults are placeholders — update after GPT-5.4 pricing publishes. |
+
+By default the collector exports only to the CloudWatch OTLP endpoint. If you
+need EMF logs for an S3/Athena analytics pipeline, deploy
+`otel-collector.yaml` with `EnableAnalytics=true`.
 
 ### 2. Harden the collector (opt-in — recommended before production use)
 

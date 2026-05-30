@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: 'Codex on Bedrock — CloudWatch dashboard (per-user usage, error rate, spend estimate). Reads metrics emitted by the Codex CLI via the OTel collector stack.'
+Description: 'Codex on Bedrock CloudWatch dashboard using native PromQL widgets over OTLP-ingested metrics.'
 
 Parameters:
   DashboardName:
@@ -7,19 +7,18 @@ Parameters:
     Default: CodexOnBedrock
     Description: Name of the CloudWatch dashboard
 
-  MetricsNamespace:
+  MetricsRegion:
     Type: String
-    Default: Codex
-    Description: CloudWatch namespace metrics are published under (must match otel-collector.yaml MetricsNamespace)
+    Default: us-west-2
+    Description: Region where CloudWatch OTLP metrics are ingested
 
   # Pricing multipliers are USD per 1M tokens. Update to the current Bedrock
   # list price for the model you run with Codex. Defaults below are placeholders
-  # — they estimate order-of-magnitude spend, not actual billed cost. Ground
-  # truth is CUR (see specs/02-otel-dashboard.md).
+  # and estimate order-of-magnitude spend only. Ground truth is CUR.
   InputTokenPriceUsdPerMillion:
     Type: Number
     Default: 0.15
-    Description: USD per 1M input tokens (placeholder — set to real Bedrock list price)
+    Description: USD per 1M input tokens
 
   OutputTokenPriceUsdPerMillion:
     Type: Number
@@ -39,55 +38,189 @@ Resources:
       DashboardBody: !Sub |
         {
           "widgets": [
-            {"type":"text","x":0,"y":0,"width":24,"height":2,"properties":{"markdown":"# Codex on Bedrock — Usage & Adoption\n\nPer-user attribution via install-time-baked `x-user-id` header. Metrics emitted by Codex CLI, aggregated through ADOT collector to CloudWatch. **Spend figures are estimates** from token counts × Bedrock list pricing; ground-truth spend lives in CUR (see `specs/02-otel-dashboard.md`)."}},
-
-            {"type":"metric","x":0,"y":2,"width":12,"height":6,"properties":{
-              "title":"Estimated token spend (USD) per user — last 24h",
-              "region":"${AWS::Region}","view":"bar","stacked":true,"period":86400,
-              "metrics":[
-                [{"expression":"SEARCH('Namespace=\"${MetricsNamespace}\" MetricName=\"codex.turn.token_usage\" token_type=\"input\"', 'Sum', 86400)","label":"input","id":"i","visible":false}],
-                [{"expression":"SEARCH('Namespace=\"${MetricsNamespace}\" MetricName=\"codex.turn.token_usage\" token_type=\"output\"', 'Sum', 86400)","label":"output","id":"o","visible":false}],
-                [{"expression":"SEARCH('Namespace=\"${MetricsNamespace}\" MetricName=\"codex.turn.token_usage\" token_type=\"cached_input\"', 'Sum', 86400)","label":"cached_input","id":"c","visible":false}],
-                [{"expression":"i * ${InputTokenPriceUsdPerMillion} / 1000000","label":"$ input (est)","id":"e1"}],
-                [{"expression":"o * ${OutputTokenPriceUsdPerMillion} / 1000000","label":"$ output (est)","id":"e2"}],
-                [{"expression":"c * ${CachedInputTokenPriceUsdPerMillion} / 1000000","label":"$ cached (est)","id":"e3"}]
-              ]
-            }},
-
-            {"type":"metric","x":12,"y":2,"width":12,"height":6,"properties":{
-              "title":"API error rate per user (last 1h)","region":"${AWS::Region}","view":"bar","stacked":false,"period":3600,
-              "metrics":[
-                [{"expression":"SEARCH('Namespace=\"${MetricsNamespace}\" MetricName=\"codex.api_request\" success=\"false\"', 'Sum', 3600)","label":"failed requests","id":"f"}],
-                [{"expression":"SEARCH('Namespace=\"${MetricsNamespace}\" MetricName=\"codex.api_request\" success=\"true\"', 'Sum', 3600)","label":"successful requests","id":"s"}]
-              ]
-            }},
-
-            {"type":"metric","x":0,"y":8,"width":12,"height":6,"properties":{
-              "title":"Turn E2E duration per user (p50 / p95)","region":"${AWS::Region}","view":"timeSeries","period":300,
-              "metrics":[
-                [{"expression":"SEARCH('Namespace=\"${MetricsNamespace}\" MetricName=\"codex.turn.e2e_duration_ms\"', 'p50', 300)","label":"p50","id":"p50"}],
-                [{"expression":"SEARCH('Namespace=\"${MetricsNamespace}\" MetricName=\"codex.turn.e2e_duration_ms\"', 'p95', 300)","label":"p95","id":"p95"}]
-              ]
-            }},
-
-            {"type":"metric","x":12,"y":8,"width":12,"height":6,"properties":{
-              "title":"Session-source mix (cli / desktop / vscode)","region":"${AWS::Region}","view":"pie","period":86400,"stat":"Sum",
-              "metrics":[
-                [{"expression":"SEARCH('Namespace=\"${MetricsNamespace}\" MetricName=\"codex.thread.started\"', 'Sum', 86400)","label":"threads by source","id":"t"}]
-              ]
-            }},
-
-            {"type":"log","x":0,"y":14,"width":12,"height":6,"properties":{
-              "title":"Active-developer leaderboard (last 7 days)","region":"${AWS::Region}",
-              "query":"SOURCE '/aws/codex/metrics' | filter ispresent(`user.id`) and ispresent(`codex.api_request`) | stats count() as api_requests, sum(`codex.api_request`) as total_calls by `user.id` | sort total_calls desc | limit 25"
-            }},
-
-            {"type":"log","x":12,"y":14,"width":12,"height":6,"properties":{
-              "title":"Adoption funnel (last 7 days)","region":"${AWS::Region}",
-              "query":"SOURCE '/aws/codex/metrics' | stats count_distinct(`user.id`) as installed by `app.version` | sort installed desc"
-            }},
-
-            {"type":"text","x":0,"y":20,"width":24,"height":2,"properties":{"markdown":"## Code acceptance — pending validation\n\nCodex 0.130.0-alpha.7 did not emit `codex.code_edit_tool.*` metrics during simple text prompts. These metrics may only fire during actual edit flows. If your developers run code-edit sessions and the metrics surface, add a panel here filtered on `codex.code_edit_tool.decision` with dimension `decision`."}}
+            {
+              "type": "text",
+              "x": 0, "y": 0, "width": 24, "height": 2,
+              "properties": {
+                "markdown": "# Codex on Bedrock - Usage & Adoption\n\nMetrics are emitted by Codex through OTLP and queried directly from CloudWatch with PromQL. Spend widgets are estimates from token counts; CUR remains the billing source of truth.",
+                "background": "transparent"
+              }
+            },
+            {
+              "type": "chart",
+              "x": 0, "y": 2, "width": 6, "height": 4,
+              "properties": {
+                "title": "Total Tokens",
+                "view": "number",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [{ "id": "a", "type": "cloudwatch-metrics", "language": "PromQL", "query": "sum({\"codex.turn.token_usage\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60, "label": "Tokens" }] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "chart",
+              "x": 6, "y": 2, "width": 6, "height": 4,
+              "properties": {
+                "title": "Active Developers",
+                "view": "number",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [{ "id": "a", "type": "cloudwatch-metrics", "language": "PromQL", "query": "count(group by (\"user.id\")({\"codex.thread.started\", \"@resource.service.name\"=\"codex_cli_rs\"}))", "step": 60, "label": "Developers" }] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "chart",
+              "x": 12, "y": 2, "width": 6, "height": 4,
+              "properties": {
+                "title": "API Requests",
+                "view": "number",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [{ "id": "a", "type": "cloudwatch-metrics", "language": "PromQL", "query": "sum({\"codex.api_request\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60, "label": "Requests" }] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "chart",
+              "x": 18, "y": 2, "width": 6, "height": 4,
+              "properties": {
+                "title": "Error Rate",
+                "view": "number",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [{ "id": "a", "type": "cloudwatch-metrics", "language": "PromQL", "query": "sum({\"codex.api_request\", success=\"false\", \"@resource.service.name\"=\"codex_cli_rs\"}) / sum({\"codex.api_request\", \"@resource.service.name\"=\"codex_cli_rs\"}) * 100", "step": 60, "label": "%" }] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "text",
+              "x": 0, "y": 6, "width": 24, "height": 2,
+              "properties": { "markdown": "## Token Usage", "background": "transparent" }
+            },
+            {
+              "type": "chart",
+              "x": 0, "y": 8, "width": 12, "height": 6,
+              "properties": {
+                "title": "Token Usage Over Time",
+                "view": "line",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [
+                  { "id": "total", "type": "cloudwatch-metrics", "language": "PromQL", "query": "sum({\"codex.turn.token_usage\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60, "label": "Total" }
+                ] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": true, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "chart",
+              "x": 12, "y": 8, "width": 12, "height": 6,
+              "properties": {
+                "title": "Token Usage by Type",
+                "view": "line",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [
+                  { "id": "input", "type": "cloudwatch-metrics", "language": "PromQL", "query": "sum({\"codex.turn.token_usage\", token_type=\"input\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60, "label": "Input" },
+                  { "id": "output", "type": "cloudwatch-metrics", "language": "PromQL", "query": "sum({\"codex.turn.token_usage\", token_type=\"output\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60, "label": "Output" },
+                  { "id": "cached", "type": "cloudwatch-metrics", "language": "PromQL", "query": "sum({\"codex.turn.token_usage\", token_type=\"cached_input\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60, "label": "Cached Input" },
+                  { "id": "reasoning", "type": "cloudwatch-metrics", "language": "PromQL", "query": "sum({\"codex.turn.token_usage\", token_type=\"reasoning_output\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60, "label": "Reasoning Output" }
+                ] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "chart",
+              "x": 0, "y": 14, "width": 12, "height": 6,
+              "properties": {
+                "title": "Token Usage by Model",
+                "view": "line",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [
+                  { "id": "a", "type": "cloudwatch-metrics", "language": "PromQL", "query": "topk(50, sum by (model)({\"codex.turn.token_usage\", \"@resource.service.name\"=\"codex_cli_rs\"}))", "step": 60 }
+                ] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": true, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "chart",
+              "x": 12, "y": 14, "width": 12, "height": 6,
+              "properties": {
+                "title": "Top Developers by Token Usage",
+                "view": "line",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [
+                  { "id": "a", "type": "cloudwatch-metrics", "language": "PromQL", "query": "topk(50, sum by (\"user.id\")({\"codex.turn.token_usage\", \"@resource.service.name\"=\"codex_cli_rs\"}))", "step": 60 }
+                ] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "chart",
+              "x": 0, "y": 20, "width": 12, "height": 6,
+              "properties": {
+                "title": "Estimated Spend by Developer",
+                "view": "line",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [
+                  { "id": "a", "type": "cloudwatch-metrics", "language": "PromQL", "query": "topk(50, sum by (\"user.id\")({\"codex.turn.token_usage\", token_type=\"input\", \"@resource.service.name\"=\"codex_cli_rs\"}) * ${InputTokenPriceUsdPerMillion} / 1000000 + sum by (\"user.id\")({\"codex.turn.token_usage\", token_type=\"output\", \"@resource.service.name\"=\"codex_cli_rs\"}) * ${OutputTokenPriceUsdPerMillion} / 1000000 + sum by (\"user.id\")({\"codex.turn.token_usage\", token_type=\"cached_input\", \"@resource.service.name\"=\"codex_cli_rs\"}) * ${CachedInputTokenPriceUsdPerMillion} / 1000000)", "step": 60, "label": "USD estimate" }
+                ] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "chart",
+              "x": 12, "y": 20, "width": 12, "height": 6,
+              "properties": {
+                "title": "Turn Duration p50 / p95",
+                "view": "line",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [
+                  { "id": "p50", "type": "cloudwatch-metrics", "language": "PromQL", "query": "quantile(0.50, {\"codex.turn.e2e_duration_ms\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60, "label": "p50" },
+                  { "id": "p95", "type": "cloudwatch-metrics", "language": "PromQL", "query": "quantile(0.95, {\"codex.turn.e2e_duration_ms\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60, "label": "p95" }
+                ] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "text",
+              "x": 0, "y": 26, "width": 24, "height": 2,
+              "properties": { "markdown": "## Adoption and Reliability", "background": "transparent" }
+            },
+            {
+              "type": "chart",
+              "x": 0, "y": 28, "width": 8, "height": 6,
+              "properties": {
+                "title": "Session Source Mix",
+                "view": "pie",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [
+                  { "id": "a", "type": "cloudwatch-metrics", "language": "PromQL", "query": "sum by (session_source)({\"codex.thread.started\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60 }
+                ] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": true, "stacked": true, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "chart",
+              "x": 8, "y": 28, "width": 8, "height": 6,
+              "properties": {
+                "title": "API Requests by Status",
+                "view": "line",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [
+                  { "id": "a", "type": "cloudwatch-metrics", "language": "PromQL", "query": "sum by (status)({\"codex.api_request\", \"@resource.service.name\"=\"codex_cli_rs\"})", "step": 60 }
+                ] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            },
+            {
+              "type": "chart",
+              "x": 16, "y": 28, "width": 8, "height": 6,
+              "properties": {
+                "title": "Tool Calls",
+                "view": "line",
+                "region": "${MetricsRegion}",
+                "data": { "queries": [
+                  { "id": "a", "type": "cloudwatch-metrics", "language": "PromQL", "query": "topk(20, sum by (tool_name)({\"codex.turn.tool.call\", \"@resource.service.name\"=\"codex_cli_rs\"}))", "step": 60 }
+                ] },
+                "plotOptions": { "legend": { "position": "bottom", "show": true }, "xAxis": { "type": "datetime" }, "yAxis": [{ "type": "linear" }], "style": { "lineOptions": { "filled": false, "stacked": false, "width": 2, "pattern": "solid", "spline": false }, "numberOptions": { "sparkline": true }, "pieOptions": { "innerSize": "50%" }, "barOptions": {}, "gaugeOptions": {} } }
+              }
+            }
           ]
         }
 

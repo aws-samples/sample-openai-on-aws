@@ -17,8 +17,8 @@ Parameters:
 
   MetricsNamespace:
     Type: String
-    Default: LiteLLMGateway
-    Description: CloudWatch metrics namespace
+    Default: Codex
+    Description: CloudWatch EMF metrics namespace when EnableAnalytics is true
 
   CustomDomainName:
     Type: String
@@ -53,10 +53,10 @@ Parameters:
 
 Conditions:
   HasCustomDomain: !Not [!Equals [!Ref CustomDomainName, '']]
+  NoCustomDomain: !Equals [!Ref CustomDomainName, '']
   HasJwtAuth: !Not [!Equals [!Ref OidcIssuerUrl, '']]
   HasOidcClientId: !Not [!Equals [!Ref OidcClientId, '']]
   AnalyticsEnabled: !Equals [!Ref EnableAnalytics, 'true']
-  AnalyticsDisabled: !Not [!Equals [!Ref EnableAnalytics, 'true']]
 
 # Rules section removed - validation handled by deployment script
 
@@ -87,7 +87,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Condition: AnalyticsEnabled
     Properties:
-      LogGroupName: !Sub "/aws/${AWS::StackName}/metrics"
+      LogGroupName: /aws/codex/metrics
       RetentionInDays: 30
       Tags:
         - Key: Purpose
@@ -95,7 +95,6 @@ Resources:
         - Key: Stack
           Value: !Ref AWS::StackName
 
-  # Security Groups
   # Security Groups
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -330,18 +329,18 @@ Resources:
                 Action:
                   - cloudwatch:PutMetricData
                 Resource: '*'
-              # EMF exporter needs CloudWatch Logs permissions
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                  - logs:CreateLogGroup
-                  - logs:PutRetentionPolicy
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codex/metrics'
-                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codex/metrics:*'
-                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/litellm/metrics'
-                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/litellm/metrics:*'
+              - !If
+                - AnalyticsEnabled
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                    - logs:CreateLogGroup
+                    - logs:PutRetentionPolicy
+                  Resource:
+                    - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codex/metrics'
+                    - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codex/metrics:*'
+                - !Ref AWS::NoValue
         # We keep the CloudWatch permissions but remove the AssumeRole permission
         # that was related to the overly permissive trust policy
         - PolicyName: SSMParameterAccess
@@ -355,119 +354,216 @@ Resources:
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-config'
 
-  # SSM Parameter for Configuration
+  # SSM Parameter for Configuration. The default path exports only to
+  # CloudWatch native OTLP; analytics mode adds EMF logs for downstream SQL.
   OTelConfig:
     Type: AWS::SSM::Parameter
     Properties:
       Name: !Sub "${AWS::StackName}-config"
       Type: String
       Tier: Advanced
-      Description: Custom OpenTelemetry configuration for Codex
-      Value: !Sub |
-        extensions:
-          health_check:
-            endpoint: 0.0.0.0:13133
-            path: /
+      Description: !If
+        - AnalyticsEnabled
+        - "OpenTelemetry configuration for Codex - dual export (OTLP + EMF)"
+        - "OpenTelemetry configuration for Codex - CloudWatch OTLP export only"
+      Value: !If
+        - AnalyticsEnabled
+        - !Sub |
+            extensions:
+              health_check:
+                endpoint: 0.0.0.0:13133
+                path: /
+              sigv4auth:
+                service: "monitoring"
+                region: "${AWS::Region}"
 
-        receivers:
-          otlp:
-            protocols:
-              grpc:
-                endpoint: 0.0.0.0:4317
-                include_metadata: true
-              http:
-                endpoint: 0.0.0.0:4318
-                include_metadata: true
+            receivers:
+              otlp:
+                protocols:
+                  grpc:
+                    endpoint: 0.0.0.0:4317
+                    include_metadata: true
+                  http:
+                    endpoint: 0.0.0.0:4318
+                    include_metadata: true
 
-        processors:
-          batch/metrics:
-            timeout: 60s
-          # Extract HTTP headers to resource attributes
-          # Note: Headers are normalized to lowercase in metadata
-          attributes:
-            actions:
-              # Extract user information from headers
-              - key: user.email
-                from_context: metadata.x-user-email
-                action: upsert
-              - key: user.id
-                from_context: metadata.x-user-id
-                action: upsert
-              - key: user.name
-                from_context: metadata.x-user-name
-                action: upsert
-              # Extract team/organization information
-              - key: department
-                from_context: metadata.x-department
-                action: upsert
-              - key: team.id
-                from_context: metadata.x-team-id
-                action: upsert
-              - key: cost_center
-                from_context: metadata.x-cost-center
-                action: upsert
-              - key: organization
-                from_context: metadata.x-organization
-                action: upsert
-              - key: location
-                from_context: metadata.x-location
-                action: upsert
-              - key: role
-                from_context: metadata.x-role
-                action: upsert
-              - key: manager
-                from_context: metadata.x-manager
-                action: upsert
-          # Add AWS account ID to all metrics
-          resource:
-            attributes:
-              - key: aws.account_id
-                value: "${AWS::AccountId}"
-                action: insert
-              - key: deployment.environment
-                value: "production"
-                action: insert
+            processors:
+              batch/metrics:
+                timeout: 60s
+              attributes:
+                actions:
+                  - key: user.email
+                    from_context: metadata.x-user-email
+                    action: upsert
+                  - key: user.id
+                    from_context: metadata.x-user-id
+                    action: upsert
+                  - key: user.name
+                    from_context: metadata.x-user-name
+                    action: upsert
+                  - key: department
+                    from_context: metadata.x-department
+                    action: upsert
+                  - key: team.id
+                    from_context: metadata.x-team-id
+                    action: upsert
+                  - key: cost_center
+                    from_context: metadata.x-cost-center
+                    action: upsert
+                  - key: organization
+                    from_context: metadata.x-organization
+                    action: upsert
+                  - key: location
+                    from_context: metadata.x-location
+                    action: upsert
+                  - key: role
+                    from_context: metadata.x-role
+                    action: upsert
+                  - key: manager
+                    from_context: metadata.x-manager
+                    action: upsert
+              resource:
+                attributes:
+                  - key: aws.account_id
+                    value: "${AWS::AccountId}"
+                    action: insert
+                  - key: deployment.environment
+                    value: "production"
+                    action: insert
 
-        exporters:
-          # Debug exporter for troubleshooting
-          debug:
-            verbosity: detailed
-            sampling_initial: 10
-            sampling_thereafter: 100
+            exporters:
+              otlphttp:
+                tls:
+                  insecure: false
+                endpoint: "https://monitoring.${AWS::Region}.amazonaws.com"
+                auth:
+                  authenticator: sigv4auth
 
-          # Accept but drop logs and traces until we have a concrete use case
-          debug/sink:
-            verbosity: basic
+              debug/sink:
+                verbosity: basic
 
-          # CloudWatch EMF (AWS OTEL Collector doesn't support native OTLP yet)
-          awsemf:
-            region: ${AWS::Region}
-            namespace: ${MetricsNamespace}
-            log_group_name: /aws/codex/metrics
-            dimension_rollup_option: "ZeroAndSingleDimensionRollup"
-            output_destination: cloudwatch
-            resource_to_telemetry_conversion:
-              enabled: true
+              awsemf:
+                region: ${AWS::Region}
+                namespace: ${MetricsNamespace}
+                log_group_name: /aws/codex/metrics
+                dimension_rollup_option: "ZeroAndSingleDimensionRollup"
+                output_destination: cloudwatch
+                log_retention: 30
+                resource_to_telemetry_conversion:
+                  enabled: true
 
-        service:
-          extensions: [health_check]
-          telemetry:
-            logs:
-              level: info
-              development: false
-              encoding: json
-              output_paths: [stdout]
-          pipelines:
-            metrics:
-              receivers: [otlp]
-              processors: [attributes, resource, batch/metrics]
-              exporters: [debug, awsemf]
-            logs:
-              receivers: [otlp]
-              exporters: [debug/sink]
-            traces:
-              receivers: [otlp]
-              exporters: [debug/sink]
+            service:
+              extensions: [health_check, sigv4auth]
+              telemetry:
+                logs:
+                  level: info
+                  development: false
+                  encoding: json
+                  output_paths: [stdout]
+              pipelines:
+                metrics:
+                  receivers: [otlp]
+                  processors: [attributes, resource, batch/metrics]
+                  exporters: [otlphttp, awsemf]
+                logs:
+                  receivers: [otlp]
+                  exporters: [debug/sink]
+                traces:
+                  receivers: [otlp]
+                  exporters: [debug/sink]
+        - !Sub |
+            extensions:
+              health_check:
+                endpoint: 0.0.0.0:13133
+                path: /
+              sigv4auth:
+                service: "monitoring"
+                region: "${AWS::Region}"
+
+            receivers:
+              otlp:
+                protocols:
+                  grpc:
+                    endpoint: 0.0.0.0:4317
+                    include_metadata: true
+                  http:
+                    endpoint: 0.0.0.0:4318
+                    include_metadata: true
+
+            processors:
+              batch/metrics:
+                timeout: 60s
+              attributes:
+                actions:
+                  - key: user.email
+                    from_context: metadata.x-user-email
+                    action: upsert
+                  - key: user.id
+                    from_context: metadata.x-user-id
+                    action: upsert
+                  - key: user.name
+                    from_context: metadata.x-user-name
+                    action: upsert
+                  - key: department
+                    from_context: metadata.x-department
+                    action: upsert
+                  - key: team.id
+                    from_context: metadata.x-team-id
+                    action: upsert
+                  - key: cost_center
+                    from_context: metadata.x-cost-center
+                    action: upsert
+                  - key: organization
+                    from_context: metadata.x-organization
+                    action: upsert
+                  - key: location
+                    from_context: metadata.x-location
+                    action: upsert
+                  - key: role
+                    from_context: metadata.x-role
+                    action: upsert
+                  - key: manager
+                    from_context: metadata.x-manager
+                    action: upsert
+              resource:
+                attributes:
+                  - key: aws.account_id
+                    value: "${AWS::AccountId}"
+                    action: insert
+                  - key: deployment.environment
+                    value: "production"
+                    action: insert
+
+            exporters:
+              otlphttp:
+                tls:
+                  insecure: false
+                endpoint: "https://monitoring.${AWS::Region}.amazonaws.com"
+                auth:
+                  authenticator: sigv4auth
+
+              debug/sink:
+                verbosity: basic
+
+            service:
+              extensions: [health_check, sigv4auth]
+              telemetry:
+                logs:
+                  level: info
+                  development: false
+                  encoding: json
+                  output_paths: [stdout]
+              pipelines:
+                metrics:
+                  receivers: [otlp]
+                  processors: [attributes, resource, batch/metrics]
+                  exporters: [otlphttp]
+                logs:
+                  receivers: [otlp]
+                  exporters: [debug/sink]
+                traces:
+                  receivers: [otlp]
+                  exporters: [debug/sink]
 
   # ECS Task Definition
   TaskDefinition:
@@ -501,9 +597,11 @@ Resources:
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: ecs
 
-  # ECS Service
-  ECSService:
+  # ECS Service - split by listener path so DependsOn never references a
+  # conditionally absent HTTPS listener.
+  ECSServiceHTTP:
     Type: AWS::ECS::Service
+    Condition: NoCustomDomain
     DependsOn:
       - HTTPListener
     Properties:
@@ -524,8 +622,33 @@ Resources:
           TargetGroupArn: !Ref HTTPTargetGroup
       HealthCheckGracePeriodSeconds: 60
 
+  ECSServiceHTTPS:
+    Type: AWS::ECS::Service
+    Condition: HasCustomDomain
+    DependsOn:
+      - HTTPListener
+      - HTTPSListener
+    Properties:
+      ServiceName: !Sub "${AWS::StackName}-service"
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref TaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref TaskSecurityGroup
+          Subnets: !Ref SubnetIds
+      LoadBalancers:
+        - ContainerName: aws-otel-collector
+          ContainerPort: 4318
+          TargetGroupArn: !Ref HTTPTargetGroup
+      HealthCheckGracePeriodSeconds: 60
+
   # Auto Scaling - Commented out due to service-linked role requirements
-  # Uncomment if you want auto-scaling and have the necessary service-linked role
+  # Uncomment if you want auto-scaling and have the necessary service-linked role.
+  # Use ECSServiceHTTP or ECSServiceHTTPS as DependsOn based on the deployment path.
   #
   # ServiceScalingTarget:
   #   Type: AWS::ApplicationAutoScaling::ScalableTarget
@@ -579,7 +702,8 @@ Outputs:
     Value: !Ref OTelConfig
 
   LogGroupName:
-    Description: CloudWatch Log Group for metrics
+    Description: CloudWatch Log Group for EMF metrics when analytics is enabled
+    Condition: AnalyticsEnabled
     Value: /aws/codex/metrics
 
   Note:
