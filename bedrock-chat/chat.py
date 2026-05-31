@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bedrock Chat — A simple CLI chat application powered by GPT-5.4 on Amazon Bedrock.
+"""OpenAI Chat — A simple CLI chat application powered by GPT-5.4.
 
 This is a basic synchronous chat loop. It sends user messages to the model
 and prints responses. There is no streaming, no conversation history, and
@@ -42,7 +42,7 @@ def stream_message(client, model: str, message: str) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Chat with GPT-5.4 on Amazon Bedrock")
+    parser = argparse.ArgumentParser(description="Chat with GPT-5.4 using the OpenAI API")
     parser.add_argument("--model", default=MODEL, help="Model ID to use")
     parser.add_argument("--single", type=str, help="Send a single message and exit")
     parser.add_argument("--stream", action="store_true", help="Stream tokens as they arrive")
@@ -60,7 +60,7 @@ def main():
         return
 
     # Interactive chat loop
-    print(f"Bedrock Chat (model: {args.model})")
+    print(f"OpenAI Chat (model: {args.model})")
     print("Type your message and press Enter. Type 'quit' to exit.")
     print("-" * 40)
 

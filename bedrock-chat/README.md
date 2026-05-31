@@ -1,10 +1,10 @@
-# Bedrock Chat
+# OpenAI Chat
 
-A simple CLI chat application powered by GPT-5.4 on Amazon Bedrock Mantle.
+A simple CLI chat application powered by GPT-5.4 through the OpenAI API.
 
 ## What this does
 
-This is a basic synchronous chat loop. It sends your messages to GPT-5.4 via the Amazon Bedrock Mantle endpoint and prints the responses.
+This is a basic synchronous chat loop. It sends your messages to GPT-5.4 using the OpenAI Python SDK and prints the responses.
 
 ## What's intentionally missing (your exercise)
 
@@ -20,7 +20,12 @@ This app is deliberately minimal. During the workshop, you'll use Codex to add:
 pip install -r requirements.txt
 ```
 
-Ensure your AWS credentials are configured and you have access to OpenAI models on Bedrock.
+Set your OpenAI API key before running the app:
+
+```bash
+export OPENAI_API_KEY="paste-your-api-key-here"
+export MODEL_ID="gpt-5.4"
+```
 
 ## Usage
 
@@ -38,7 +43,7 @@ python chat.py --stream
 python chat.py --stream --single "Tell me a haiku about clouds"
 
 # Use a different model
-python chat.py --model openai.gpt-oss-120b
+python chat.py --model gpt-5.4
 ```
 
 ## Project structure
@@ -46,7 +51,7 @@ python chat.py --model openai.gpt-oss-120b
 ```
 bedrock-chat/
 ├── chat.py           # Main application (CLI entry point)
-├── config.py         # Bedrock endpoint and client configuration
+├── config.py         # OpenAI client configuration
 ├── requirements.txt  # Python dependencies
 ├── tests/
 │   └── test_chat.py  # Unit tests
