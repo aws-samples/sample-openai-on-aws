@@ -4,7 +4,7 @@ import os
 
 from openai import OpenAI
 
-MODEL = os.environ.get("MODEL_ID", "gpt-5.4")
+MODEL = os.environ.get("MODEL_ID", "gpt-5.5")
 
 
 def get_client() -> OpenAI:

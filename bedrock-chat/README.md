@@ -1,18 +1,18 @@
 # OpenAI Chat
 
-A simple CLI chat application powered by GPT-5.4 through the OpenAI API.
+A simple CLI chat application powered by GPT-5.5 through the OpenAI API.
 
 ## What this does
 
-This is a basic synchronous chat loop. It sends your messages to GPT-5.4 using the OpenAI Python SDK and prints the responses.
+This is a basic CLI chat loop. It sends your messages to GPT-5.5 using the OpenAI Python SDK and prints the responses. It supports interactive chat, one-shot prompts for testing, model overrides, and token-by-token streaming with `--stream`.
 
 ## What's intentionally missing (your exercise)
 
 This app is deliberately minimal. During the workshop, you'll use Codex to add:
 
-- **Streaming support** — See responses appear token-by-token
 - **Conversation history** — Multi-turn context so the model remembers earlier messages
 - **Structured output mode** — Get responses in JSON format with a defined schema
+- **A more polished CLI experience** — Commands such as clearing history, exporting a transcript, or switching modes safely
 
 ## Setup
 
@@ -24,7 +24,8 @@ Set your OpenAI API key before running the app:
 
 ```bash
 export OPENAI_API_KEY="paste-your-api-key-here"
-export MODEL_ID="gpt-5.4"
+export MODEL_ID="gpt-5.5"
+# Or use gpt-5.4 if your facilitator selected GPT-5.4 for the session.
 ```
 
 ## Usage
@@ -42,7 +43,7 @@ python chat.py --stream
 # Stream a single response
 python chat.py --stream --single "Tell me a haiku about clouds"
 
-# Use a different model
+# Use a different supported workshop model
 python chat.py --model gpt-5.4
 ```
 

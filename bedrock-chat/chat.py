@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""OpenAI Chat — A simple CLI chat application powered by GPT-5.4.
+"""OpenAI Chat — A simple CLI chat application powered by GPT-5.5.
 
 This is a basic synchronous chat loop. It sends user messages to the model
-and prints responses. There is no streaming, no conversation history, and
-no structured output — those are features you will add during the workshop.
+and prints responses. It supports one-shot prompts, interactive chat, and
+streaming output. Conversation history and structured output are left as
+workshop exercises.
 """
 
 import argparse
@@ -42,7 +43,7 @@ def stream_message(client, model: str, message: str) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Chat with GPT-5.4 using the OpenAI API")
+    parser = argparse.ArgumentParser(description="Chat with GPT-5.5 using the OpenAI API")
     parser.add_argument("--model", default=MODEL, help="Model ID to use")
     parser.add_argument("--single", type=str, help="Send a single message and exit")
     parser.add_argument("--stream", action="store_true", help="Stream tokens as they arrive")
