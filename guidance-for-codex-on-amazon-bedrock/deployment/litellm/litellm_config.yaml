@@ -1,4 +1,15 @@
 model_list:
+  # OpenAI GPT-5.x models via Bedrock Mantle
+  - model_name: gpt-5.5
+    litellm_params:
+      model: bedrock/openai.gpt-5.5
+      aws_region_name: us-east-2   # GPT-5.5 is us-east-2 only
+
+  - model_name: gpt-5.4
+    litellm_params:
+      model: bedrock/openai.gpt-5.4
+      aws_region_name: os.environ/AWS_REGION
+
   # OpenAI OSS models via Bedrock (primary — for Codex)
   - model_name: gpt-4o
     litellm_params:
