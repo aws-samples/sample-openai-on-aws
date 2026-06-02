@@ -192,13 +192,10 @@ When you deploy the LiteLLM reference stacks:
 
 | Model ID | Notes |
 |----------|-------|
-| `openai.gpt-5.4` | **Recommended default.** Served via Bedrock Mantle. |
-| `openai.gpt-oss-120b-1:0` | GPT-OSS 120B (Converse-compatible). |
-| `openai.gpt-oss-20b-1:0` | GPT-OSS 20B (Converse-compatible). |
-| `openai.gpt-oss-safeguard-120b` | Safeguard variant. |
-| `openai.gpt-oss-safeguard-20b` | Safeguard variant. |
+| `openai.gpt-5.5` | Latest model. `us-east-2` only. |
+| `openai.gpt-5.4` | **Recommended default.** `us-east-2`, `us-west-2`. |
 
-**Regions:** Available in `us-east-1`, `us-east-2`, `us-west-2`
+**Regions:** GPT-5.5: `us-east-2` only. GPT-5.4: `us-east-2`, `us-west-2`.
 
 Full region × model matrix: **[docs/reference-regions.md](docs/reference-regions.md)**
 

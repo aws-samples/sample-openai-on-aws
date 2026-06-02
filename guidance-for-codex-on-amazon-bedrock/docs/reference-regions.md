@@ -1,7 +1,7 @@
 # Reference — Regions & Models
 
 Single source of truth for "where can I run Codex on Bedrock, and with which
-model IDs." Cross-check against the authoritative AWS GPT-5.4-on-Bedrock
+model IDs." Cross-check against the authoritative AWS GPT-5.4/GPT-5.5-on-Bedrock
 getting-started guide — if that guide disagrees, it takes precedence.
 
 ## Partitions
@@ -14,27 +14,21 @@ getting-started guide — if that guide disagrees, it takes precedence.
 
 ## Region × model matrix
 
-AWS's getting-started guide names `us-west-2` as the GPT-5.4 "Production
-region". Run `aws bedrock list-foundation-models --region <region>` to check
-availability in any other region as access becomes available.
+Run `aws bedrock list-foundation-models --region <region>` to check availability
+in any region as access expands.
 
-| Model ID | Endpoint | Notes |
-|---|---|---|
-| `openai.gpt-5.4` | Mantle | Primary model. Served via `bedrock-mantle.<region>.api.aws/openai/v1/responses`. Codex `amazon-bedrock` provider targets this endpoint. |
-| `openai.gpt-oss-120b-1:0` | Standard Converse | Useful for connectivity tests. |
-| `openai.gpt-oss-20b-1:0` | Standard Converse | |
-| `openai.gpt-oss-safeguard-120b` | Standard Converse | Safeguard variant. |
-| `openai.gpt-oss-safeguard-20b` | Standard Converse | Safeguard variant. |
+| Model ID | Endpoint | Regions | Notes |
+|---|---|---|---|
+| `openai.gpt-5.5` | Mantle | `us-east-2` | Latest model. Reasoning + verbosity params supported. |
+| `openai.gpt-5.4` | Mantle | `us-east-2`, `us-west-2` | **Recommended default.** Broader region coverage. |
 
-CLI examples in this repository use `us-west-2` as a placeholder. Substitute any region where your target model is activated.
+CLI examples in this repository use `us-west-2` as a placeholder. For GPT-5.5, use `us-east-2`. For GPT-5.4, substitute any supported region.
 
 ## Endpoints
 
-- **Standard Bedrock (Converse / InvokeModel):** `bedrock-runtime.<region>.amazonaws.com` — serves the `gpt-oss*` family today.
-- **Mantle (OpenAI-compatible Responses API):** `bedrock-mantle.<region>.api.aws/openai/v1` — serves GPT-5.4. This is the endpoint the Codex `amazon-bedrock` provider and the LiteLLM Gateway `openai` → Bedrock route target.
+- **Mantle (OpenAI-compatible Responses API):** `bedrock-mantle.<region>.api.aws/openai/v1` — serves GPT-5.4 and GPT-5.5. This is the endpoint the Codex `amazon-bedrock` provider and the LiteLLM Gateway `openai` → Bedrock route target.
 
-Both endpoints accept SigV4 with service name `bedrock` (standard) or service
-name `bedrock-mantle` (mantle, e.g. `--aws-sigv4 "aws:amz:us-west-2:bedrock-mantle"`).
+Accepts SigV4 with service name `bedrock-mantle` (e.g. `--aws-sigv4 "aws:amz:us-east-2:bedrock-mantle"`).
 
 ## Quotas
 
