@@ -19,9 +19,9 @@ in any region as access expands.
 
 | Model ID | Endpoint | Regions | API | Notes |
 |---|---|---|---|---|
-| `openai.gpt-5.5` | Mantle | `us-east-2` | Responses only | Responses API only — not compatible with Codex or Chat Completions clients. |
-| `openai.gpt-5.4` | Mantle | `us-east-2`, `us-west-2`, `us-gov-west-1` | Responses only | Responses API only — not compatible with Codex or Chat Completions clients. |
-| `openai.gpt-oss-safeguard-120b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions | **Recommended for Codex.** Maps to `gpt-4o` alias in gateway. |
+| `openai.gpt-5.5` | Mantle | `us-east-2` | Responses only | Compatible with Codex via LiteLLM `route_all_chat_openai_to_responses`. |
+| `openai.gpt-5.4` | Mantle | `us-east-2`, `us-west-2`, `us-gov-west-1` | Responses only | **Recommended default.** Compatible with Codex via LiteLLM `route_all_chat_openai_to_responses`. |
+| `openai.gpt-oss-safeguard-120b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions | Maps to `gpt-4o` alias in gateway. |
 | `openai.gpt-oss-safeguard-20b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions | Maps to `gpt-4o-mini` alias in gateway. |
 | `openai.gpt-oss-120b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions + Responses | Full API support. |
 | `openai.gpt-oss-20b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions + Responses | Full API support. |
@@ -30,7 +30,7 @@ CLI examples in this repository use `us-west-2` as a placeholder. For GPT-5.5, u
 
 ## Endpoints
 
-- **Mantle (OpenAI-compatible API):** `bedrock-mantle.<region>.api.aws/v1` — serves GPT-5.4, GPT-5.5, and GPT-OSS models. Used by the LiteLLM Gateway via the `bedrock_mantle/` provider prefix.
+- **Mantle (OpenAI-compatible API):** `bedrock-mantle.<region>.api.aws/openai/v1` — serves GPT-5.4, GPT-5.5, and GPT-OSS models. Used by the LiteLLM Gateway via the `openai/` provider prefix with `route_all_chat_openai_to_responses: true` for GPT-5.x.
 
 Authenticates with a Bedrock API key as a Bearer token (`Authorization: Bearer <key>`). Generate a short-term key (12h) from your IAM credentials:
 ```bash

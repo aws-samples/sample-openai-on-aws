@@ -425,20 +425,32 @@ Edit `deployment/litellm/litellm_config.yaml`:
 
 ```yaml
 model_list:
+  - model_name: gpt-5.4
+    litellm_params:
+      model: openai/openai.gpt-5.4
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-west-2.api.aws/openai/v1"
+
+  - model_name: gpt-5.5
+    litellm_params:
+      model: openai/openai.gpt-5.5
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
+
   - model_name: gpt-4o
     litellm_params:
-      model: bedrock_mantle/openai.gpt-oss-safeguard-120b
+      model: openai/openai.gpt-oss-safeguard-120b
       api_key: os.environ/BEDROCK_MANTLE_API_KEY
-      api_base: "https://bedrock-mantle.us-west-2.api.aws/v1"
+      api_base: "https://bedrock-mantle.us-west-2.api.aws/openai/v1"
 
   - model_name: gpt-4o-mini
     litellm_params:
-      model: bedrock_mantle/openai.gpt-oss-safeguard-20b
+      model: openai/openai.gpt-oss-safeguard-20b
       api_key: os.environ/BEDROCK_MANTLE_API_KEY
-      api_base: "https://bedrock-mantle.us-west-2.api.aws/v1"
+      api_base: "https://bedrock-mantle.us-west-2.api.aws/openai/v1"
 ```
 
-> **Note on GPT-5.4 / GPT-5.5:** These models only support the OpenAI Responses API, not Chat Completions. They are not compatible with Codex or LiteLLM's chat proxy. Use GPT-OSS models above for Codex workloads.
+> **Note on GPT-5.4 / GPT-5.5:** These models use the Responses API. The `route_all_chat_openai_to_responses: true` setting in `litellm_settings` transparently maps incoming Chat Completions requests to the Responses API, so Codex works without any client-side changes.
 
 Rebuild and redeploy the image (Steps 2 & 6).
 
