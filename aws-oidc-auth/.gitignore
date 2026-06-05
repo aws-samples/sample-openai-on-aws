@@ -3,3 +3,5 @@ bin/
 /credential-process.exe
 /otel-helper
 /otel-helper.exe
+coverage.out
+coverage.html
