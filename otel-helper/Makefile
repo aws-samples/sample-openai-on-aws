@@ -2,17 +2,12 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 LDFLAGS := -s -w -X otel-helper/internal/version.Version=$(VERSION)
 OUT ?= bin
 
-.PHONY: all test coverage clean fmt vet macos-arm64 macos-intel linux-x64 linux-arm64 windows
+.PHONY: all test clean fmt vet macos-arm64 macos-intel linux-x64 linux-arm64 windows
 
 all: macos-arm64 macos-intel linux-x64 linux-arm64 windows
 
 test:
 	go test ./... -v
-
-coverage:
-	go test ./... -coverprofile=coverage.out -covermode=atomic
-	go tool cover -func=coverage.out
-	go tool cover -html=coverage.out -o coverage.html
 
 fmt:
 	go fmt ./...
