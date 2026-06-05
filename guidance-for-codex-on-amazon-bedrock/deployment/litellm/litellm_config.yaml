@@ -8,13 +8,13 @@ model_list:
     litellm_params:
       model: openai/openai.gpt-5.4
       api_key: os.environ/BEDROCK_MANTLE_API_KEY
-      api_base: "https://bedrock-mantle.us-west-2.api.aws/openai/v1"
+      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 
   - model_name: gpt-5.5
     litellm_params:
       model: openai/openai.gpt-5.5
       api_key: os.environ/BEDROCK_MANTLE_API_KEY
-      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"  # us-east-2 only
+      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

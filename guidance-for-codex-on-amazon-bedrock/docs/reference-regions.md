@@ -26,11 +26,13 @@ in any region as access expands.
 | `openai.gpt-oss-120b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions + Responses | Full API support. |
 | `openai.gpt-oss-20b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions + Responses | Full API support. |
 
-CLI examples in this repository use `us-west-2` as a placeholder. For GPT-5.5, use `us-east-2`. For GPT-5.4, substitute any supported region.
+The LiteLLM gateway config uses `us-east-2` for both models (single Bedrock API key scope). For GPT-5.4 in `us-west-2` or `us-gov-west-1`, update `api_base` in `litellm_config.yaml` and regenerate the key with `AWS_DEFAULT_REGION=<region>`.
 
 ## Endpoints
 
 - **Mantle (OpenAI-compatible API):** `bedrock-mantle.<region>.api.aws/openai/v1` — serves GPT-5.4, GPT-5.5, and GPT-OSS models. Used by the LiteLLM Gateway via the `openai/` provider prefix with `route_all_chat_openai_to_responses: true` for GPT-5.x.
+
+> **Note:** The LiteLLM gateway config uses `us-east-2` for both GPT-5.4 and GPT-5.5 because the Bedrock API key must be scoped to a single region. GPT-5.4 is also available in `us-west-2` and `us-gov-west-1` — override the `api_base` and set `AWS_DEFAULT_REGION=<region>` when generating the key if you need a different region.
 
 Authenticates with a Bedrock API key as a Bearer token (`Authorization: Bearer <key>`). Generate a short-term key (12h) from your IAM credentials:
 ```bash

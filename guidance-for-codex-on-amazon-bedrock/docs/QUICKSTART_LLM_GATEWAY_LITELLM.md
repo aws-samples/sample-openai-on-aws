@@ -136,9 +136,10 @@ export GATEWAY_STACK=codex-litellm-gateway
 export MASTER_KEY=$(openssl rand -hex 32)
 export DB_PASSWORD=$(openssl rand -base64 32)
 
-# Generate a short-term Bedrock Mantle API key (valid 12h) — required for GPT-5.x and GPT-OSS models
+# Generate a short-term Bedrock Mantle API key scoped to us-east-2 (valid 12h)
+# Both gpt-5.4 and gpt-5.5 use us-east-2 endpoints — key must match
 pip install aws-bedrock-token-generator -q
-export BEDROCK_MANTLE_KEY=$(python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())")
+export BEDROCK_MANTLE_KEY=$(AWS_DEFAULT_REGION=us-east-2 python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())")
 
 # Deploy gateway (references networking stack via imports)
 aws cloudformation deploy \
@@ -429,28 +430,16 @@ model_list:
     litellm_params:
       model: openai/openai.gpt-5.4
       api_key: os.environ/BEDROCK_MANTLE_API_KEY
-      api_base: "https://bedrock-mantle.us-west-2.api.aws/openai/v1"
+      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 
   - model_name: gpt-5.5
     litellm_params:
       model: openai/openai.gpt-5.5
       api_key: os.environ/BEDROCK_MANTLE_API_KEY
       api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
-
-  - model_name: gpt-4o
-    litellm_params:
-      model: openai/openai.gpt-oss-safeguard-120b
-      api_key: os.environ/BEDROCK_MANTLE_API_KEY
-      api_base: "https://bedrock-mantle.us-west-2.api.aws/openai/v1"
-
-  - model_name: gpt-4o-mini
-    litellm_params:
-      model: openai/openai.gpt-oss-safeguard-20b
-      api_key: os.environ/BEDROCK_MANTLE_API_KEY
-      api_base: "https://bedrock-mantle.us-west-2.api.aws/openai/v1"
 ```
 
-> **Note on GPT-5.4 / GPT-5.5:** These models use the Responses API. The `route_all_chat_openai_to_responses: true` setting in `litellm_settings` transparently maps incoming Chat Completions requests to the Responses API, so Codex works without any client-side changes.
+> **Note on GPT-5.4 / GPT-5.5:** These models use the Responses API. The `route_all_chat_openai_to_responses: true` setting in `litellm_settings` transparently maps incoming Chat Completions requests to the Responses API, so Codex works without any client-side changes. Both endpoints use `us-east-2` so a single `BEDROCK_MANTLE_API_KEY` (generated with `AWS_DEFAULT_REGION=us-east-2`) covers both models. GPT-5.4 is also available in `us-west-2` — see `reference-regions.md` if you prefer a different region.
 
 Rebuild and redeploy the image (Steps 2 & 6).
 
