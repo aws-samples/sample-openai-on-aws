@@ -1,5 +1,5 @@
 bin/
-credential-process
-credential-process.exe
-otel-helper
-otel-helper.exe
+/credential-process
+/credential-process.exe
+/otel-helper
+/otel-helper.exe
