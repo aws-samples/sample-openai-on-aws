@@ -136,6 +136,10 @@ export GATEWAY_STACK=codex-litellm-gateway
 export MASTER_KEY=$(openssl rand -hex 32)
 export DB_PASSWORD=$(openssl rand -base64 32)
 
+# Generate a short-term Bedrock Mantle API key (valid 12h) — required for GPT-5.x and GPT-OSS models
+pip install aws-bedrock-token-generator -q
+export BEDROCK_MANTLE_KEY=$(python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())")
+
 # Deploy gateway (references networking stack via imports)
 aws cloudformation deploy \
   --stack-name "$GATEWAY_STACK" \
@@ -147,6 +151,7 @@ aws cloudformation deploy \
       OtelStackName="$OTEL_STACK" \
       EnableOtel="true" \
       LiteLLMMasterKey="$MASTER_KEY" \
+      BedrockMantleApiKey="$BEDROCK_MANTLE_KEY" \
       DBPassword="$DB_PASSWORD" \
       AwsRegion="$AWS_REGION" \
       LiteLLMImage="$LITELLM_IMAGE" \
@@ -182,7 +187,7 @@ curl -X POST "$GATEWAY_URL/key/generate" \
   -d '{
     "key_alias": "alice@company.com",
     "user_id": "alice@company.com",
-    "models": ["openai.gpt-oss-120b"],
+    "models": ["gpt-4o", "gpt-4o-mini", "gpt-oss-120b"],
     "max_budget": 50.0,
     "budget_duration": "30d",
     "tpm_limit": 100000,
@@ -202,7 +207,7 @@ Developers add this to `~/.codex/config.toml`:
 
 ```toml
 model_provider = "litellm-gateway"
-model = "gpt-4o"
+model = "gpt-4o"  # maps to GPT-OSS Safeguard 120b via Bedrock Mantle
 
 [model_providers.litellm-gateway]
 name = "LiteLLM Gateway"
@@ -347,7 +352,7 @@ echo $OPENAI_API_KEY
 curl -X POST "$GATEWAY_URL/v1/chat/completions" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"test"}]}'
+  -d '{"model":"gpt-5.4","messages":[{"role":"user","content":"test"}]}'
 ```
 
 ### Docker build fails
@@ -422,14 +427,18 @@ Edit `deployment/litellm/litellm_config.yaml`:
 model_list:
   - model_name: gpt-4o
     litellm_params:
-      model: bedrock/openai.gpt-oss-120b
-      aws_region_name: us-west-2
-  
+      model: bedrock_mantle/openai.gpt-oss-safeguard-120b
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-west-2.api.aws/v1"
+
   - model_name: gpt-4o-mini
     litellm_params:
-      model: bedrock/openai.gpt-oss-20b
-      aws_region_name: us-west-2
+      model: bedrock_mantle/openai.gpt-oss-safeguard-20b
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-west-2.api.aws/v1"
 ```
+
+> **Note on GPT-5.4 / GPT-5.5:** These models only support the OpenAI Responses API, not Chat Completions. They are not compatible with Codex or LiteLLM's chat proxy. Use GPT-OSS models above for Codex workloads.
 
 Rebuild and redeploy the image (Steps 2 & 6).
 

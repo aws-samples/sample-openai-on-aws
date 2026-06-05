@@ -27,6 +27,14 @@ Parameters:
     NoEcho: true
     Description: LiteLLM master key - stored in Secrets Manager
 
+  BedrockMantleApiKey:
+    Type: String
+    NoEcho: true
+    Description: >
+      Bedrock Mantle API key for GPT-5.x and GPT-OSS models. Generate a short-term key
+      (valid 12h) using: pip install aws-bedrock-token-generator &&
+      python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())"
+
   DBPassword:
     Type: String
     NoEcho: true
@@ -114,8 +122,8 @@ Resources:
   LiteLLMSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Name: !Sub "${AWS::StackName}/litellm-master-key"
-      SecretString: !Sub '{"LITELLM_MASTER_KEY":"${LiteLLMMasterKey}"}'
+      Name: !Sub "${AWS::StackName}/litellm-secrets"
+      SecretString: !Sub '{"LITELLM_MASTER_KEY":"${LiteLLMMasterKey}","BEDROCK_MANTLE_API_KEY":"${BedrockMantleApiKey}"}'
 
   # --- IAM ---
 
@@ -136,7 +144,9 @@ Resources:
           PolicyDocument:
             Statement:
               - Effect: Allow
-                Action: secretsmanager:GetSecretValue
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
                 Resource: !Ref LiteLLMSecret
 
   TaskRole:
@@ -158,6 +168,10 @@ Resources:
                   - bedrock:InvokeModel
                   - bedrock:InvokeModelWithResponseStream
                 Resource: !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+              - Effect: Allow
+                Action:
+                  - bedrock:CallWithBearerToken
+                Resource: "*"
         - PolicyName: CloudWatchLogs
           PolicyDocument:
             Statement:
@@ -301,6 +315,8 @@ Resources:
           Secrets:
             - Name: LITELLM_MASTER_KEY
               ValueFrom: !Sub "${LiteLLMSecret}:LITELLM_MASTER_KEY::"
+            - Name: BEDROCK_MANTLE_API_KEY
+              ValueFrom: !Sub "${LiteLLMSecret}:BEDROCK_MANTLE_API_KEY::"
           LogConfiguration:
             LogDriver: awslogs
             Options:

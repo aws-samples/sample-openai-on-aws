@@ -111,7 +111,7 @@ Once deployed, developers configure Codex to use the gateway. Your admin provide
 ```toml
 # ~/.codex/config.toml
 model_provider = "my-gateway"
-model = "gpt-4o"  # or openai.gpt-oss-120b
+model = "gpt-4o"  # maps to GPT-OSS Safeguard 120b via Bedrock Mantle
 
 [model_providers.my-gateway]
 name = "My LLM Gateway"

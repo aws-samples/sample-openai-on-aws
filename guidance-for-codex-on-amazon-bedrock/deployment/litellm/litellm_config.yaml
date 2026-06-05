@@ -1,45 +1,34 @@
 model_list:
-  # OpenAI GPT-5.x models via Bedrock Mantle
-  - model_name: gpt-5.5
-    litellm_params:
-      model: bedrock/openai.gpt-5.5
-      aws_region_name: us-east-2   # GPT-5.5 is us-east-2 only
+  # OpenAI GPT-OSS models via Amazon Bedrock Mantle (Chat Completions — compatible with Codex)
+  # Auth: set BEDROCK_MANTLE_API_KEY to a short-term Bedrock API key (valid 12h)
+  # Generate: pip install aws-bedrock-token-generator && python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())"
+  #
+  # Note: GPT-5.4 and GPT-5.5 only support the Responses API (not Chat Completions) and
+  # are therefore not compatible with Codex or LiteLLM's chat proxy. Use GPT-OSS models below.
 
-  - model_name: gpt-5.4
-    litellm_params:
-      model: bedrock/openai.gpt-5.4
-      aws_region_name: os.environ/AWS_REGION
-
-  # OpenAI OSS models via Bedrock (primary — for Codex)
   - model_name: gpt-4o
     litellm_params:
-      model: bedrock/openai.gpt-oss-safeguard-120b
-      aws_region_name: os.environ/AWS_REGION
+      model: bedrock_mantle/openai.gpt-oss-safeguard-120b
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-west-2.api.aws/v1"
 
   - model_name: gpt-4o-mini
     litellm_params:
-      model: bedrock/openai.gpt-oss-safeguard-20b
-      aws_region_name: os.environ/AWS_REGION
+      model: bedrock_mantle/openai.gpt-oss-safeguard-20b
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-west-2.api.aws/v1"
 
   - model_name: gpt-oss-120b
     litellm_params:
-      model: bedrock/openai.gpt-oss-120b-1:0
-      aws_region_name: os.environ/AWS_REGION
+      model: bedrock_mantle/openai.gpt-oss-120b
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-west-2.api.aws/v1"
 
   - model_name: gpt-oss-20b
     litellm_params:
-      model: bedrock/openai.gpt-oss-20b-1:0
-      aws_region_name: os.environ/AWS_REGION
-
-  - model_name: gpt-oss-safeguard-120b
-    litellm_params:
-      model: bedrock/openai.gpt-oss-safeguard-120b
-      aws_region_name: os.environ/AWS_REGION
-
-  - model_name: gpt-oss-safeguard-20b
-    litellm_params:
-      model: bedrock/openai.gpt-oss-safeguard-20b
-      aws_region_name: os.environ/AWS_REGION
+      model: bedrock_mantle/openai.gpt-oss-20b
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-west-2.api.aws/v1"
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
