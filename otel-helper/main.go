@@ -10,11 +10,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"otel-helper/internal/jwt"
 	"otel-helper/internal/otel"
 	"otel-helper/internal/version"
 )
+
+// emptyHeadersCacheTTLSeconds bounds how long THIS binary serves an empty-headers
+// result from the file cache before it retries credential-process.
+const emptyHeadersCacheTTLSeconds = 120
 
 var (
 	logger  = log.New(os.Stderr, "", log.LstdFlags)
@@ -70,16 +75,16 @@ func run(testMode bool) int {
 		var err error
 		token, err = getTokenViaCredentialProcess(profile)
 		if err != nil || token == "" {
-			debugPrint("Could not obtain authentication token")
-			return 1
+			debugPrint("Could not obtain authentication token; emitting empty headers")
+			return emitEmptyHeaders(profile, testMode)
 		}
 	}
 
 	// Decode JWT and extract user info
 	claims, err := jwt.DecodePayload(token)
 	if err != nil {
-		debugPrint("Error decoding JWT: %v", err)
-		return 1
+		debugPrint("Error decoding JWT: %v; emitting empty headers", err)
+		return emitEmptyHeaders(profile, testMode)
 	}
 
 	userInfo := otel.ExtractUserInfo(claims)
@@ -100,6 +105,23 @@ func run(testMode bool) int {
 		outputJSON(headers)
 	}
 
+	return 0
+}
+
+func emitEmptyHeaders(profile string, testMode bool) int {
+	headers := map[string]string{}
+	if testMode {
+		printTestOutput(otel.UserInfo{}, headers)
+		return 0
+	}
+	if otel.EmptyHeadersWriteSafe(profile) {
+		if err := otel.WriteCachedHeaders(profile, headers, time.Now().Unix()+emptyHeadersCacheTTLSeconds); err != nil {
+			debugPrint("Failed to write empty-headers cache: %v", err)
+		}
+	} else {
+		debugPrint("Skipping empty-headers cache write to preserve existing attribution")
+	}
+	outputJSON(headers)
 	return 0
 }
 

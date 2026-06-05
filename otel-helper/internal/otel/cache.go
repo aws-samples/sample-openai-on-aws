@@ -8,11 +8,14 @@ import (
 	"time"
 )
 
+const currentCacheSchemaVersion = 1
+
 // cacheEntry is the JSON structure of {profile}-otel-headers.json.
 type cacheEntry struct {
-	Headers  map[string]string `json:"headers"`
-	TokenExp int64             `json:"token_exp"`
-	CachedAt int64             `json:"cached_at"`
+	SchemaVersion int               `json:"schema_version"`
+	Headers       map[string]string `json:"headers"`
+	TokenExp      int64             `json:"token_exp"`
+	CachedAt      int64             `json:"cached_at"`
 }
 
 // CacheDir returns the path to ~/.aws-oidc-session/, creating it if needed.
@@ -28,7 +31,9 @@ func CacheDir() (string, error) {
 	return dir, nil
 }
 
-// ReadCachedHeaders returns cached headers if the token hasn't expired (with 10 min buffer).
+// ReadCachedHeaders returns cached headers if the entry is valid.
+// Populated headers are served past expiry (they are static user attributes).
+// Empty-headers entries are served only while their TTL is still valid.
 func ReadCachedHeaders(profile string) (map[string]string, error) {
 	dir, err := CacheDir()
 	if err != nil {
@@ -45,12 +50,46 @@ func ReadCachedHeaders(profile string) (map[string]string, error) {
 		return nil, err
 	}
 
-	now := time.Now().Unix()
-	if entry.TokenExp-now > 600 {
-		return entry.Headers, nil
+	if entry.SchemaVersion < currentCacheSchemaVersion {
+		return nil, fmt.Errorf("cache schema %d < %d; refreshing", entry.SchemaVersion, currentCacheSchemaVersion)
 	}
 
-	return nil, fmt.Errorf("cache expired")
+	if entry.Headers == nil {
+		return nil, fmt.Errorf("cache empty")
+	}
+
+	if len(entry.Headers) == 0 && (entry.TokenExp <= 0 || time.Now().Unix() >= entry.TokenExp) {
+		return nil, fmt.Errorf("empty-headers cache expired or untimed; refreshing")
+	}
+
+	return entry.Headers, nil
+}
+
+// EmptyHeadersWriteSafe returns true only when it is safe to overwrite the
+// cache file for profile with an empty-headers entry. It returns false if a
+// current-schema entry with populated headers already exists, protecting
+// against a transient read failure clobbering valid attribution data.
+func EmptyHeadersWriteSafe(profile string) bool {
+	dir, err := CacheDir()
+	if err != nil {
+		return false
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, profile+"-otel-headers.json"))
+	if err != nil {
+		return os.IsNotExist(err)
+	}
+
+	var entry cacheEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return false
+	}
+
+	if entry.SchemaVersion < currentCacheSchemaVersion {
+		return true
+	}
+
+	return len(entry.Headers) == 0
 }
 
 // WriteCachedHeaders writes both the metadata cache and the raw headers file atomically.
@@ -62,9 +101,10 @@ func WriteCachedHeaders(profile string, headers map[string]string, tokenExp int6
 
 	// Write main cache file
 	entry := cacheEntry{
-		Headers:  headers,
-		TokenExp: tokenExp,
-		CachedAt: time.Now().Unix(),
+		SchemaVersion: currentCacheSchemaVersion,
+		Headers:       headers,
+		TokenExp:      tokenExp,
+		CachedAt:      time.Now().Unix(),
 	}
 	entryData, err := json.Marshal(entry)
 	if err != nil {
