@@ -6,13 +6,13 @@ model_list:
 
   - model_name: gpt-5.4
     litellm_params:
-      model: openai/openai.gpt-5.4
+      model: openai/responses/openai.gpt-5.4
       api_key: os.environ/BEDROCK_MANTLE_API_KEY
       api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 
   - model_name: gpt-5.5
     litellm_params:
-      model: openai/openai.gpt-5.5
+      model: openai/responses/openai.gpt-5.5
       api_key: os.environ/BEDROCK_MANTLE_API_KEY
       api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 
@@ -33,6 +33,5 @@ general_settings:
 
 litellm_settings:
   set_verbose: false
-  drop_params: true                          # silently drop unsupported OpenAI params
-  route_all_chat_openai_to_responses: true   # routes gpt-5.x chat/completions calls → Responses API
-  # callbacks: ["otel"]                      # uncomment + set OTEL_ENDPOINT env var if you wire up an OTel collector
+  drop_params: true    # silently drop unsupported OpenAI params
+  # callbacks: ["otel"]  # uncomment + set OTEL_ENDPOINT env var if you wire up an OTel collector

@@ -428,18 +428,18 @@ Edit `deployment/litellm/litellm_config.yaml`:
 model_list:
   - model_name: gpt-5.4
     litellm_params:
-      model: openai/openai.gpt-5.4
+      model: openai/responses/openai.gpt-5.4
       api_key: os.environ/BEDROCK_MANTLE_API_KEY
       api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 
   - model_name: gpt-5.5
     litellm_params:
-      model: openai/openai.gpt-5.5
+      model: openai/responses/openai.gpt-5.5
       api_key: os.environ/BEDROCK_MANTLE_API_KEY
       api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 ```
 
-> **Note on GPT-5.4 / GPT-5.5:** These models use the Responses API. The `route_all_chat_openai_to_responses: true` setting in `litellm_settings` transparently maps incoming Chat Completions requests to the Responses API, so Codex works without any client-side changes. Both endpoints use `us-east-2` so a single `BEDROCK_MANTLE_API_KEY` (generated with `AWS_DEFAULT_REGION=us-east-2`) covers both models. GPT-5.4 is also available in `us-west-2` — see `reference-regions.md` if you prefer a different region.
+> **Note on GPT-5.4 / GPT-5.5:** These models only support the Responses API. The `responses/` prefix in the model string tells LiteLLM to route the request through its Responses API bridge, transparently converting incoming Chat Completions requests so Codex works without client-side changes. Both endpoints use `us-east-2` so a single `BEDROCK_MANTLE_API_KEY` (generated with `AWS_DEFAULT_REGION=us-east-2`) covers both models. GPT-5.4 is also available in `us-west-2` — see `reference-regions.md` if you prefer a different region.
 
 Rebuild and redeploy the image (Steps 2 & 6).
 
