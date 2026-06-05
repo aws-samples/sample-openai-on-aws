@@ -1,45 +1,20 @@
 model_list:
-  # OpenAI GPT-5.x models via Bedrock Mantle
-  - model_name: gpt-5.5
-    litellm_params:
-      model: bedrock/openai.gpt-5.5
-      aws_region_name: us-east-2   # GPT-5.5 is us-east-2 only
+  # OpenAI GPT-5.x models via Amazon Bedrock Mantle
+  # Auth: set BEDROCK_MANTLE_API_KEY to a short-term Bedrock API key (valid 12h)
+  # Generate: pip install aws-bedrock-token-generator && python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())"
+  # Note: Codex (v0.136+) calls /v1/responses directly (wire_api=responses). LiteLLM proxies to Bedrock Mantle as-is.
 
   - model_name: gpt-5.4
     litellm_params:
-      model: bedrock/openai.gpt-5.4
-      aws_region_name: os.environ/AWS_REGION
+      model: openai/openai.gpt-5.4
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 
-  # OpenAI OSS models via Bedrock (primary — for Codex)
-  - model_name: gpt-4o
+  - model_name: gpt-5.5
     litellm_params:
-      model: bedrock/openai.gpt-oss-safeguard-120b
-      aws_region_name: os.environ/AWS_REGION
-
-  - model_name: gpt-4o-mini
-    litellm_params:
-      model: bedrock/openai.gpt-oss-safeguard-20b
-      aws_region_name: os.environ/AWS_REGION
-
-  - model_name: gpt-oss-120b
-    litellm_params:
-      model: bedrock/openai.gpt-oss-120b-1:0
-      aws_region_name: os.environ/AWS_REGION
-
-  - model_name: gpt-oss-20b
-    litellm_params:
-      model: bedrock/openai.gpt-oss-20b-1:0
-      aws_region_name: os.environ/AWS_REGION
-
-  - model_name: gpt-oss-safeguard-120b
-    litellm_params:
-      model: bedrock/openai.gpt-oss-safeguard-120b
-      aws_region_name: os.environ/AWS_REGION
-
-  - model_name: gpt-oss-safeguard-20b
-    litellm_params:
-      model: bedrock/openai.gpt-oss-safeguard-20b
-      aws_region_name: os.environ/AWS_REGION
+      model: openai/openai.gpt-5.5
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
@@ -58,5 +33,5 @@ general_settings:
 
 litellm_settings:
   set_verbose: false
-  drop_params: true               # silently drop unsupported OpenAI params
-  # callbacks: ["otel"]           # uncomment + set OTEL_ENDPOINT env var if you wire up an OTel collector
+  drop_params: true    # silently drop unsupported OpenAI params
+  # callbacks: ["otel"]  # uncomment + set OTEL_ENDPOINT env var if you wire up an OTel collector

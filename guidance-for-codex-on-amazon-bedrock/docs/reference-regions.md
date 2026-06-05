@@ -17,18 +17,28 @@ getting-started guide — if that guide disagrees, it takes precedence.
 Run `aws bedrock list-foundation-models --region <region>` to check availability
 in any region as access expands.
 
-| Model ID | Endpoint | Regions | Notes |
-|---|---|---|---|
-| `openai.gpt-5.5` | Mantle | `us-east-2` | Latest model. Reasoning + verbosity params supported. |
-| `openai.gpt-5.4` | Mantle | `us-east-2`, `us-west-2` | **Recommended default.** Broader region coverage. |
+| Model ID | Endpoint | Regions | API | Notes |
+|---|---|---|---|---|
+| `openai.gpt-5.5` | Mantle | `us-east-2` | Responses only | Codex uses `wire_api = "responses"` to call `/v1/responses` directly; LiteLLM proxies straight to Bedrock Mantle. |
+| `openai.gpt-5.4` | Mantle | `us-east-2`, `us-west-2`, `us-gov-west-1` | Responses only | **Recommended default.** Codex uses `wire_api = "responses"` to call `/v1/responses` directly; LiteLLM proxies straight to Bedrock Mantle. |
+| `openai.gpt-oss-safeguard-120b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions | Maps to `gpt-4o` alias in gateway. |
+| `openai.gpt-oss-safeguard-20b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions | Maps to `gpt-4o-mini` alias in gateway. |
+| `openai.gpt-oss-120b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions + Responses | Full API support. |
+| `openai.gpt-oss-20b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions + Responses | Full API support. |
 
-CLI examples in this repository use `us-west-2` as a placeholder. For GPT-5.5, use `us-east-2`. For GPT-5.4, substitute any supported region.
+The LiteLLM gateway config uses `us-east-2` for both models (single Bedrock API key scope). For GPT-5.4 in `us-west-2` or `us-gov-west-1`, update `api_base` in `litellm_config.yaml` and regenerate the key with `AWS_DEFAULT_REGION=<region>`.
 
 ## Endpoints
 
-- **Mantle (OpenAI-compatible Responses API):** `bedrock-mantle.<region>.api.aws/openai/v1` — serves GPT-5.4 and GPT-5.5. This is the endpoint the Codex `amazon-bedrock` provider and the LiteLLM Gateway `openai` → Bedrock route target.
+- **Mantle (OpenAI-compatible API):** `bedrock-mantle.<region>.api.aws/openai/v1` — serves GPT-5.4, GPT-5.5, and GPT-OSS models. The LiteLLM Gateway uses the `openai/<model>` model string and proxies requests from Codex (which calls `/v1/responses` directly via `wire_api = "responses"`) straight to Bedrock Mantle.
 
-Accepts SigV4 with service name `bedrock-mantle` (e.g. `--aws-sigv4 "aws:amz:us-east-2:bedrock-mantle"`).
+> **Note:** The LiteLLM gateway config uses `us-east-2` for both GPT-5.4 and GPT-5.5 because the Bedrock API key must be scoped to a single region. GPT-5.4 is also available in `us-west-2` and `us-gov-west-1` — override the `api_base` and set `AWS_DEFAULT_REGION=<region>` when generating the key if you need a different region.
+
+Authenticates with a Bedrock API key as a Bearer token (`Authorization: Bearer <key>`). Generate a short-term key (12h) from your IAM credentials:
+```bash
+pip install aws-bedrock-token-generator
+python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())"
+```
 
 ## Quotas
 

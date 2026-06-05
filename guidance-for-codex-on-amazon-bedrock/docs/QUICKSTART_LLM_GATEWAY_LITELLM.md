@@ -136,6 +136,11 @@ export GATEWAY_STACK=codex-litellm-gateway
 export MASTER_KEY=$(openssl rand -hex 32)
 export DB_PASSWORD=$(openssl rand -base64 32)
 
+# Generate a short-term Bedrock Mantle API key scoped to us-east-2 (valid 12h)
+# Both gpt-5.4 and gpt-5.5 use us-east-2 endpoints — key must match
+pip install aws-bedrock-token-generator -q
+export BEDROCK_MANTLE_KEY=$(AWS_DEFAULT_REGION=us-east-2 python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())")
+
 # Deploy gateway (references networking stack via imports)
 aws cloudformation deploy \
   --stack-name "$GATEWAY_STACK" \
@@ -147,6 +152,7 @@ aws cloudformation deploy \
       OtelStackName="$OTEL_STACK" \
       EnableOtel="true" \
       LiteLLMMasterKey="$MASTER_KEY" \
+      BedrockMantleApiKey="$BEDROCK_MANTLE_KEY" \
       DBPassword="$DB_PASSWORD" \
       AwsRegion="$AWS_REGION" \
       LiteLLMImage="$LITELLM_IMAGE" \
@@ -182,7 +188,7 @@ curl -X POST "$GATEWAY_URL/key/generate" \
   -d '{
     "key_alias": "alice@company.com",
     "user_id": "alice@company.com",
-    "models": ["openai.gpt-oss-120b"],
+    "models": ["gpt-4o", "gpt-4o-mini", "gpt-oss-120b"],
     "max_budget": 50.0,
     "budget_duration": "30d",
     "tpm_limit": 100000,
@@ -202,14 +208,17 @@ Developers add this to `~/.codex/config.toml`:
 
 ```toml
 model_provider = "litellm-gateway"
-model = "gpt-4o"
+model = "gpt-5.5"
+web_search = "disabled"   # Bedrock Mantle does not support the web_search tool type
 
 [model_providers.litellm-gateway]
 name = "LiteLLM Gateway"
 base_url = "http://<gateway-url>/v1"
 env_key = "OPENAI_API_KEY"
-wire_api = "chat"
+wire_api = "responses"    # Codex 0.136+ calls /v1/responses directly; must match
 ```
+
+> **Note:** `wire_api = "responses"` is required for GPT-5.x because these models only support the Responses API. `web_search = "disabled"` prevents Codex from sending a tool type that Bedrock Mantle does not accept. Both settings are required for requests to succeed.
 
 Set API key:
 
@@ -347,7 +356,7 @@ echo $OPENAI_API_KEY
 curl -X POST "$GATEWAY_URL/v1/chat/completions" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"test"}]}'
+  -d '{"model":"gpt-5.4","messages":[{"role":"user","content":"test"}]}'
 ```
 
 ### Docker build fails
@@ -420,16 +429,20 @@ Edit `deployment/litellm/litellm_config.yaml`:
 
 ```yaml
 model_list:
-  - model_name: gpt-4o
+  - model_name: gpt-5.4
     litellm_params:
-      model: bedrock/openai.gpt-oss-120b
-      aws_region_name: us-west-2
-  
-  - model_name: gpt-4o-mini
+      model: openai/openai.gpt-5.4
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
+
+  - model_name: gpt-5.5
     litellm_params:
-      model: bedrock/openai.gpt-oss-20b
-      aws_region_name: us-west-2
+      model: openai/openai.gpt-5.5
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 ```
+
+> **Note on GPT-5.4 / GPT-5.5:** These models only support the Responses API. The `openai/` prefix tells LiteLLM to proxy the request to the OpenAI-compatible Bedrock Mantle endpoint as-is — no additional routing needed because Codex (v0.136+) already calls `/v1/responses` directly via `wire_api = "responses"`. Both endpoints use `us-east-2` so a single `BEDROCK_MANTLE_API_KEY` (generated with `AWS_DEFAULT_REGION=us-east-2`) covers both models. GPT-5.4 is also available in `us-west-2` — see `reference-regions.md` if you prefer a different region.
 
 Rebuild and redeploy the image (Steps 2 & 6).
 
