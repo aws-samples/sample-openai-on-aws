@@ -1,0 +1,469 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: '( SO9610 ) Flexible Cognito Identity Pool supporting both external OIDC providers and Cognito User Pools'
+
+Parameters:
+  AuthProviderType:
+    Type: String
+    Default: ExternalOIDC
+    AllowedValues:
+      - ExternalOIDC
+      - CognitoUserPool
+    Description: Choose between external OIDC provider (Okta, Auth0, etc.) or AWS Cognito User Pool
+
+  # External OIDC Parameters (used when AuthProviderType = ExternalOIDC)
+  OIDCProviderType:
+    Type: String
+    Default: okta
+    AllowedValues:
+      - okta
+      - auth0
+      - azure
+    Description: Specific OIDC provider type - Required for ExternalOIDC
+
+  OIDCProviderDomain:
+    Type: String
+    Default: ''
+    Description: Your OIDC provider domain (e.g., company.okta.com) - Required for ExternalOIDC
+    AllowedPattern: '^$|^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z0-9]+(/[a-zA-Z0-9._/:?#@!$&()*+,;=-]*)?$'
+
+  OIDCClientId:
+    Type: String
+    Default: ''
+    Description: OIDC application client ID - Required for ExternalOIDC
+    NoEcho: true
+
+  # Cognito User Pool Parameters (used when AuthProviderType = CognitoUserPool)
+  CognitoUserPoolId:
+    Type: String
+    Default: ''
+    Description: Cognito User Pool ID (e.g., us-east-1_ABC123def) - Required for CognitoUserPool
+    AllowedPattern: '^$|^[\w-]+_[0-9a-zA-Z]+$'
+
+  CognitoUserPoolClientId:
+    Type: String
+    Default: ''
+    Description: Cognito User Pool App Client ID - Required for CognitoUserPool
+    NoEcho: true
+
+  # Common Parameters
+  IdentityPoolName:
+    Type: String
+    Default: bedrock-shared-access
+    Description: Name for the Cognito Identity Pool
+
+  MaxSessionDuration:
+    Type: Number
+    Default: 28800
+    MinValue: 3600
+    MaxValue: 43200
+    Description: Maximum session duration in seconds (8 hours)
+
+  AllowedBedrockRegions:
+    Type: CommaDelimitedList
+    Default: 'us-east-1,us-east-2,us-west-1,us-west-2,eu-west-1,eu-west-3,eu-central-1,eu-north-1,eu-south-1,eu-south-2,ap-northeast-1,ap-southeast-1,ap-southeast-2,ap-southeast-3,ap-south-1'
+    Description: AWS regions allowed for Bedrock access (configured based on selected model and cross-region profile)
+
+  EnableMonitoring:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable OpenTelemetry monitoring permissions for Codex
+
+  EnableBedrockTracking:
+    Type: String
+    Default: 'true'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Enable CloudTrail tracking of Bedrock API calls for monitoring and cost analysis
+
+Conditions:
+  UseExternalOIDC: !Equals [!Ref AuthProviderType, 'ExternalOIDC']
+  UseCognitoUserPool: !Equals [!Ref AuthProviderType, 'CognitoUserPool']
+  MonitoringEnabled: !Equals [!Ref EnableMonitoring, 'true']
+  BedrockTrackingEnabled: !Equals [!Ref EnableBedrockTracking, 'true']
+  # Partition-aware conditions for Cognito Identity service principals
+  IsGovCloudWest: !Equals [!Ref 'AWS::Region', 'us-gov-west-1']
+  IsGovCloudEast: !Equals [!Ref 'AWS::Region', 'us-gov-east-1']
+  IsGovCloud: !Or [!Condition IsGovCloudWest, !Condition IsGovCloudEast]
+
+Resources:
+  # Cognito Identity Pool - configured based on provider type
+  BedrockIdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: !Ref IdentityPoolName
+      AllowUnauthenticatedIdentities: true
+      AllowClassicFlow: false
+      # For External OIDC providers
+      OpenIdConnectProviderARNs: !If
+        - UseExternalOIDC
+        - - !GetAtt OIDCProvider.Arn
+        - !Ref 'AWS::NoValue'
+      # For Cognito User Pool
+      CognitoIdentityProviders: !If
+        - UseCognitoUserPool
+        - - ClientId: !Ref CognitoUserPoolClientId
+            ProviderName: !Sub 'cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPoolId}'
+            ServerSideTokenCheck: true
+        - !Ref 'AWS::NoValue'
+
+  # IAM OIDC Provider (only for External OIDC)
+  OIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: UseExternalOIDC
+    Properties:
+      Url: !Sub 'https://${OIDCProviderDomain}'
+      ClientIdList:
+        - !Ref OIDCClientId
+      # Most OIDC providers use trusted root CAs
+      ThumbprintList:
+        - '0000000000000000000000000000000000000000'
+
+  # Managed Policy for Bedrock Access
+  # Note: Cross-region inference requires access to all regions in the profile (us-east-1, us-east-2, us-west-2)
+  # as requests may be routed to any of these regions automatically
+  BedrockAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Policy for Cognito authenticated users to access Bedrock via cross-region inference
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowBedrockInvoke
+            Effect: Allow
+            Action:
+              - 'bedrock:InvokeModel'
+              - 'bedrock:InvokeModelWithResponseStream'
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/*'
+              - !Sub 'arn:${AWS::Partition}:bedrock:*:*:inference-profile/*'
+            Condition:
+              StringEquals:
+                'aws:RequestedRegion': !Ref AllowedBedrockRegions
+          - Sid: AllowBedrockList
+            Effect: Allow
+            Action:
+              - 'bedrock:ListFoundationModels'
+              - 'bedrock:GetFoundationModel'
+              - 'bedrock:GetFoundationModelAvailability'
+              - 'bedrock:ListInferenceProfiles'
+              - 'bedrock:GetInferenceProfile'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'aws:RequestedRegion': !Ref AllowedBedrockRegions
+          - !If
+            - MonitoringEnabled
+            - Sid: AllowCloudWatchOTLP
+              Effect: Allow
+              Action:
+                - 'cloudwatch:PutMetricData'
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  'cloudwatch:namespace':
+                    - 'Codex'
+                    - 'AWS/Bedrock'
+                  'aws:RequestedRegion': !Ref AllowedBedrockRegions
+            - !Ref 'AWS::NoValue'
+
+  # IAM Role for Bedrock Access
+  # Note: Service principal differs by partition:
+  # - Commercial: cognito-identity.amazonaws.com
+  # - GovCloud West: cognito-identity-us-gov.amazonaws.com
+  # - GovCloud East: cognito-identity.us-gov-east-1.amazonaws.com
+  BedrockAccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Role for Cognito authenticated users to access Bedrock
+      MaxSessionDuration: !Ref MaxSessionDuration
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - IsGovCloudWest
+                - cognito-identity-us-gov.amazonaws.com
+                - !If
+                  - IsGovCloudEast
+                  - cognito-identity.us-gov-east-1.amazonaws.com
+                  - cognito-identity.amazonaws.com
+            Action:
+              - 'sts:AssumeRoleWithWebIdentity'
+              - 'sts:TagSession'
+            Condition:
+              StringEquals:
+                !If
+                  - IsGovCloudWest
+                  - 'cognito-identity-us-gov.amazonaws.com:aud': !Ref BedrockIdentityPool
+                  - !If
+                    - IsGovCloudEast
+                    - 'cognito-identity.us-gov-east-1.amazonaws.com:aud': !Ref BedrockIdentityPool
+                    - 'cognito-identity.amazonaws.com:aud': !Ref BedrockIdentityPool
+              'ForAnyValue:StringLike':
+                !If
+                  - IsGovCloudWest
+                  - 'cognito-identity-us-gov.amazonaws.com:amr': authenticated
+                  - !If
+                    - IsGovCloudEast
+                    - 'cognito-identity.us-gov-east-1.amazonaws.com:amr': authenticated
+                    - 'cognito-identity.amazonaws.com:amr': authenticated
+      ManagedPolicyArns:
+        - !Ref BedrockAccessPolicy
+
+  # IAM Role for Unauthenticated Users (minimal permissions)
+  UnauthenticatedRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Minimal role for unauthenticated Cognito Identity Pool users
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - IsGovCloudWest
+                - cognito-identity-us-gov.amazonaws.com
+                - !If
+                  - IsGovCloudEast
+                  - cognito-identity.us-gov-east-1.amazonaws.com
+                  - cognito-identity.amazonaws.com
+            Action: 'sts:AssumeRoleWithWebIdentity'
+            Condition:
+              StringEquals:
+                !If
+                  - IsGovCloudWest
+                  - 'cognito-identity-us-gov.amazonaws.com:aud': !Ref BedrockIdentityPool
+                  - !If
+                    - IsGovCloudEast
+                    - 'cognito-identity.us-gov-east-1.amazonaws.com:aud': !Ref BedrockIdentityPool
+                    - 'cognito-identity.amazonaws.com:aud': !Ref BedrockIdentityPool
+              'ForAnyValue:StringLike':
+                !If
+                  - IsGovCloudWest
+                  - 'cognito-identity-us-gov.amazonaws.com:amr': unauthenticated
+                  - !If
+                    - IsGovCloudEast
+                    - 'cognito-identity.us-gov-east-1.amazonaws.com:amr': unauthenticated
+                    - 'cognito-identity.amazonaws.com:amr': unauthenticated
+      Policies:
+        - PolicyName: CognitoIdentityAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'cognito-identity:GetId'
+                  - 'cognito-identity:GetCredentialsForIdentity'
+                Resource: '*'
+
+  # Identity Pool Role Attachment
+  IdentityPoolRoleAttachment:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref BedrockIdentityPool
+      Roles:
+        authenticated: !GetAtt BedrockAccessRole.Arn
+        unauthenticated: !GetAtt UnauthenticatedRole.Arn
+
+  # Principal Tag Mapping for Session Tags
+  IdentityPoolPrincipalTag:
+    Type: AWS::Cognito::IdentityPoolPrincipalTag
+    DeletionPolicy: Delete
+    Properties:
+      IdentityPoolId: !Ref BedrockIdentityPool
+      IdentityProviderName: !If
+        - UseExternalOIDC
+        - !Ref OIDCProviderDomain
+        - !Sub 'cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPoolId}'
+      UseDefaults: false
+      PrincipalTags:
+        UserEmail: email
+        UserId: sub
+
+  # CloudWatch Log Group for Bedrock Access Tracking
+  BedrockAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: BedrockTrackingEnabled
+    Properties:
+      LogGroupName: /aws/bedrock/cognito-access
+      RetentionInDays: 30
+      Tags:
+        - Key: Purpose
+          Value: Codex Bedrock Access Tracking
+
+  # S3 Bucket for CloudTrail Logs
+  CloudTrailBucket:
+    Type: AWS::S3::Bucket
+    Condition: BedrockTrackingEnabled
+    DeletionPolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldLogs
+            Status: Enabled
+            ExpirationInDays: 90
+      Tags:
+        - Key: Purpose
+          Value: Codex CloudTrail Storage
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-cloudtrail-bucket'
+
+  # Bucket Policy for CloudTrail
+  CloudTrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: BedrockTrackingEnabled
+    Properties:
+      Bucket: !Ref CloudTrailBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt CloudTrailBucket.Arn
+            Condition:
+              StringEquals:
+                'AWS:SourceArn': !Sub 'arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/codex-bedrock-trail'
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub '${CloudTrailBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                's3:x-amz-acl': bucket-owner-full-control
+                'AWS:SourceArn': !Sub 'arn:${AWS::Partition}:cloudtrail:${AWS::Region}:${AWS::AccountId}:trail/codex-bedrock-trail'
+
+  # IAM Role for CloudTrail to Write to CloudWatch Logs
+  CloudTrailLogRole:
+    Type: AWS::IAM::Role
+    Condition: BedrockTrackingEnabled
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudTrailLogPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !GetAtt BedrockAccessLogGroup.Arn
+                  - !Sub '${BedrockAccessLogGroup.Arn}:*'
+
+  # CloudTrail for Bedrock API Monitoring
+  BedrockCloudTrail:
+    Type: AWS::CloudTrail::Trail
+    Condition: BedrockTrackingEnabled
+    DependsOn: CloudTrailBucketPolicy
+    Properties:
+      TrailName: codex-bedrock-trail
+      S3BucketName: !Ref CloudTrailBucket
+      CloudWatchLogsLogGroupArn: !GetAtt BedrockAccessLogGroup.Arn
+      CloudWatchLogsRoleArn: !GetAtt CloudTrailLogRole.Arn
+      EnableLogFileValidation: true
+      EventSelectors:
+        - ReadWriteType: All
+          IncludeManagementEvents: true
+          ExcludeManagementEventSources:
+            - kms.amazonaws.com
+            - rdsdata.amazonaws.com
+      InsightSelectors:
+        - InsightType: ApiCallRateInsight
+      IsLogging: true
+      IsMultiRegionTrail: false
+      Tags:
+        - Key: Purpose
+          Value: Codex Bedrock Monitoring
+
+Outputs:
+  IdentityPoolId:
+    Description: Cognito Identity Pool ID
+    Value: !Ref BedrockIdentityPool
+    Export:
+      Name: !Sub '${AWS::StackName}-IdentityPoolId'
+
+  BedrockRoleArn:
+    Description: IAM Role ARN for Bedrock access
+    Value: !GetAtt BedrockAccessRole.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-BedrockRoleArn'
+
+  OIDCProviderArn:
+    Description: OIDC Provider ARN (only for External OIDC)
+    Condition: UseExternalOIDC
+    Value: !GetAtt OIDCProvider.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-OIDCProviderArn'
+
+  Region:
+    Description: AWS Region for the deployment
+    Value: !Ref 'AWS::Region'
+
+  ConfigurationJson:
+    Description: Configuration JSON for CLI tool
+    Value: !If
+      - UseExternalOIDC
+      - !Sub |
+        {
+          "provider_domain": "${OIDCProviderDomain}",
+          "client_id": "${OIDCClientId}",
+          "identity_pool_id": "${BedrockIdentityPool}",
+          "aws_region": "${AWS::Region}",
+          "provider_type": "${OIDCProviderType}"
+        }
+      - !Sub |
+        {
+          "provider_domain": "TBD - Use your Cognito User Pool domain",
+          "client_id": "${CognitoUserPoolClientId}",
+          "identity_pool_id": "${BedrockIdentityPool}",
+          "aws_region": "${AWS::Region}",
+          "provider_type": "cognito",
+          "cognito_user_pool_id": "${CognitoUserPoolId}"
+        }
+
+  BedrockLogGroupName:
+    Description: CloudWatch Log Group for Bedrock access tracking
+    Condition: BedrockTrackingEnabled
+    Value: !Ref BedrockAccessLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-BedrockLogGroup'
+
+  CloudTrailName:
+    Description: CloudTrail name for Bedrock monitoring
+    Condition: BedrockTrackingEnabled
+    Value: !Ref BedrockCloudTrail
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudTrailName'
+
+  CloudTrailBucketName:
+    Description: S3 bucket for CloudTrail logs
+    Condition: BedrockTrackingEnabled
+    Value: !Ref CloudTrailBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-CloudTrailBucket'

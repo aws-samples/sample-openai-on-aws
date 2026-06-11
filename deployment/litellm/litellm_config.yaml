@@ -1,0 +1,37 @@
+model_list:
+  # OpenAI GPT-5.x models via Amazon Bedrock Mantle
+  # Auth: set BEDROCK_MANTLE_API_KEY to a short-term Bedrock API key (valid 12h)
+  # Generate: pip install aws-bedrock-token-generator && python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())"
+  # Note: Codex (v0.136+) calls /v1/responses directly (wire_api=responses). LiteLLM proxies to Bedrock Mantle as-is.
+
+  - model_name: gpt-5.4
+    litellm_params:
+      model: openai/openai.gpt-5.4
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
+
+  - model_name: gpt-5.5
+    litellm_params:
+      model: openai/openai.gpt-5.5
+      api_key: os.environ/BEDROCK_MANTLE_API_KEY
+      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+  # JWT/OIDC authentication (LiteLLM Enterprise only)
+  # Uncomment to enable when running LiteLLM Enterprise.
+  # For local testing, use LITELLM_MASTER_KEY as the Bearer token instead.
+  # Set JWT_PUBLIC_KEY_URL env var to your IdP's JWKS endpoint.
+  #
+  # enable_jwt_auth: true
+  # litellm_jwtauth:
+  #   user_id_jwt_field: "sub"
+  #   user_email_jwt_field: "email"
+  #   team_ids_jwt_field: "groups"  # array claim — maps IdP groups to LiteLLM teams
+  #   public_key_ttl: 600           # cache JWKS for 10 minutes
+
+litellm_settings:
+  set_verbose: false
+  drop_params: true    # silently drop unsupported OpenAI params
+  # callbacks: ["otel"]  # uncomment + set OTEL_ENDPOINT env var if you wire up an OTel collector

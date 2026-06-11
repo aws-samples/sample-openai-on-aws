@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Check local OTEL collector status
+
+set -euo pipefail
+
+COLLECTOR_DIR="$HOME/.codex/otel"
+COLLECTOR_PID="$COLLECTOR_DIR/otelcol.pid"
+COLLECTOR_LOG="$COLLECTOR_DIR/otelcol.log"
+
+if [[ ! -f "$COLLECTOR_PID" ]]; then
+  echo "✗ Collector not running (no PID file)"
+  exit 1
+fi
+
+PID=$(cat "$COLLECTOR_PID")
+
+if ! kill -0 "$PID" 2>/dev/null; then
+  echo "✗ Collector not running (stale PID)"
+  rm -f "$COLLECTOR_PID"
+  exit 1
+fi
+
+# Get process info
+if command -v ps &> /dev/null; then
+  START_TIME=$(ps -p "$PID" -o lstart= 2>/dev/null || echo "unknown")
+  MEM=$(ps -p "$PID" -o rss= 2>/dev/null || echo "0")
+  MEM_MB=$((MEM / 1024))
+fi
+
+echo "✓ Collector running"
+echo "  PID: $PID"
+[[ -n "${START_TIME:-}" ]] && echo "  Started: $START_TIME"
+[[ -n "${MEM_MB:-}" ]] && echo "  Memory: ${MEM_MB}MB"
+echo "  Region: __AWS_REGION__"
+echo "  User: __USER_EMAIL__"
+echo ""
+echo "Recent logs:"
+tail -n 5 "$COLLECTOR_LOG" 2>/dev/null || echo "  (no logs yet)"

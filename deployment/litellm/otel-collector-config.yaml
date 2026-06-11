@@ -1,0 +1,75 @@
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: /
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        include_metadata: true
+      http:
+        endpoint: 0.0.0.0:4318
+        include_metadata: true
+
+processors:
+  batch/metrics:
+    timeout: 60s
+  batch/logs:
+    timeout: 10s
+
+  # LiteLLM forwards user identity as span attributes — lift them to resource attributes
+  attributes:
+    actions:
+      - key: user.email
+        from_attribute: user_email
+        action: upsert
+      - key: user.id
+        from_attribute: user_id
+        action: upsert
+      - key: model
+        from_attribute: model
+        action: upsert
+      - key: team.id
+        from_attribute: team_id
+        action: upsert
+
+  resource:
+    attributes:
+      - key: aws.account_id
+        value: ""        # set via SSM / env at deploy time
+        action: insert
+      - key: deployment.environment
+        value: "production"
+        action: insert
+
+exporters:
+  # Debug exporter for troubleshooting
+  debug:
+    verbosity: detailed
+    sampling_initial: 10
+    sampling_thereafter: 100
+
+  # CloudWatch EMF (AWS OTEL Collector v0.47 doesn't support native OTLP)
+  awsemf:
+    region: ${AWS_REGION}
+    namespace: LiteLLMGateway
+    log_group_name: /aws/codex/metrics
+    dimension_rollup_option: "ZeroAndSingleDimensionRollup"
+    output_destination: cloudwatch
+    resource_to_telemetry_conversion:
+      enabled: true
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: info
+      encoding: json
+      output_paths: [stdout]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [attributes, resource, batch/metrics]
+      exporters: [debug, awsemf]
