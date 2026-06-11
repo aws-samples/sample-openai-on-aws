@@ -1,0 +1,148 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Workshop MCP Server - Self-contained Lambda that implements an MCP server
+  with a SQLite database. Bedrock invokes it directly via IAM (no public URL).
+
+Resources:
+  McpServerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  McpServerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${AWS::StackName}-mcp-server'
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Timeout: 30
+      MemorySize: 256
+      Role: !GetAtt McpServerRole.Arn
+      Code:
+        ZipFile: |
+          import json, sqlite3, os, random
+          from datetime import datetime, timedelta
+
+          DB_PATH = "/tmp/workshop.db"
+
+          def seed_db():
+              random.seed(42)
+              conn = sqlite3.connect(DB_PATH)
+              c = conn.cursor()
+              c.execute("CREATE TABLE IF NOT EXISTS customers (id INTEGER PRIMARY KEY, name TEXT, email TEXT, plan_tier TEXT, region TEXT, signup_date TEXT)")
+              c.execute("CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, category TEXT, monthly_price REAL)")
+              c.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, customer_id INTEGER, product_id INTEGER, quantity INTEGER, order_date TEXT)")
+              c.execute("CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY, customer_id INTEGER, subject TEXT, status TEXT, priority TEXT, created_at TEXT, resolved_at TEXT)")
+              if c.execute("SELECT COUNT(*) FROM customers").fetchone()[0] > 0:
+                  conn.close()
+                  return
+              products = [("EC2 Standard","compute",45),("EC2 GPU","compute",320),("Lambda Pro","compute",25),("ECS Fargate","compute",55),("S3 Standard","storage",23),("S3 Glacier","storage",4),("EBS Performance","storage",35),("EFS Shared","storage",30),("RDS PostgreSQL","database",85),("DynamoDB","database",65),("Aurora Serverless","database",120),("ElastiCache","database",75),("Bedrock Pro","ai-ml",200),("SageMaker Studio","ai-ml",150),("Rekognition","ai-ml",40),("Comprehend","ai-ml",35),("GuardDuty","security",30),("WAF Advanced","security",55),("Inspector","security",20),("Macie","security",45)]
+              c.executemany("INSERT INTO products (name,category,monthly_price) VALUES (?,?,?)", products)
+              fnames = ["Alice","Bob","Carol","David","Eve","Frank","Grace","Henry","Iris","Jack","Karen","Leo","Mia","Noah","Olivia","Pete","Quinn","Rosa","Sam","Tina"]
+              lnames = ["Chen","Smith","Patel","Kim","Garcia","Mueller","Santos","Tanaka","Williams","Brown","Singh","Nakamura","Lopez","Anderson","Taylor","Wilson","Martinez","Johnson","Lee","Clark"]
+              tiers = ["free","starter","business","enterprise"]
+              tw = [0.3,0.3,0.25,0.15]
+              regions = ["us-east","us-west","eu-west","apac"]
+              for i in range(1,101):
+                  nm = f"{random.choice(fnames)} {random.choice(lnames)}"
+                  c.execute("INSERT INTO customers (name,email,plan_tier,region,signup_date) VALUES (?,?,?,?,?)", (nm, f"{nm.lower().replace(' ','.')}+{i}@example.com", random.choices(tiers,weights=tw,k=1)[0], random.choice(regions), (datetime(2023,1,1)+timedelta(days=random.randint(0,800))).strftime("%Y-%m-%d")))
+              for i in range(300):
+                  c.execute("INSERT INTO orders (customer_id,product_id,quantity,order_date) VALUES (?,?,?,?)", (random.randint(1,100), random.randint(1,20), random.choices([1,2,3,5,10],weights=[.4,.25,.15,.1,.1],k=1)[0], (datetime(2024,1,1)+timedelta(days=random.randint(0,500))).strftime("%Y-%m-%d")))
+              subjects = ["Cannot access dashboard","Billing discrepancy","Performance degradation","Feature request: SSO","API rate limit hit","Data export failed","Permission denied error","Slow query performance","Integration broken","Need help with setup","Account locked out","Certificate expiring","Deployment failed","Monitoring alerts firing","Cost optimization request"]
+              for i in range(500):
+                  pri = random.choices(["low","medium","high","critical"],weights=[.25,.4,.25,.1],k=1)[0]
+                  st = random.choice(["open","in_progress","resolved","closed"])
+                  created = datetime(2024,6,1)+timedelta(hours=random.randint(0,8000))
+                  resolved = None
+                  if st in ("resolved","closed"):
+                      hrs = {"critical":random.randint(1,8),"high":random.randint(4,48),"medium":random.randint(12,120),"low":random.randint(24,336)}[pri]
+                      resolved = (created+timedelta(hours=hrs)).strftime("%Y-%m-%d %H:%M:%S")
+                  c.execute("INSERT INTO tickets (customer_id,subject,status,priority,created_at,resolved_at) VALUES (?,?,?,?,?,?)", (random.randint(1,100), random.choice(subjects), st, pri, created.strftime("%Y-%m-%d %H:%M:%S"), resolved))
+              conn.commit()
+              conn.close()
+
+          TOOLS = [
+              {"name":"list_tables","description":"Returns all table names in the database","inputSchema":{"type":"object","properties":{},"required":[]}},
+              {"name":"describe_table","description":"Returns column info and 3 sample rows for a given table","inputSchema":{"type":"object","properties":{"table_name":{"type":"string","description":"Name of the table to describe"}},"required":["table_name"]}},
+              {"name":"read_query","description":"Executes a read-only SQL query and returns results as JSON","inputSchema":{"type":"object","properties":{"sql":{"type":"string","description":"SELECT SQL query to execute"}},"required":["sql"]}},
+              {"name":"write_query","description":"Executes a write SQL statement (CREATE VIEW or INSERT only)","inputSchema":{"type":"object","properties":{"sql":{"type":"string","description":"SQL statement (CREATE VIEW or INSERT only)"}},"required":["sql"]}}
+          ]
+
+          def get_conn(readonly=True):
+              seed_db()
+              if readonly:
+                  return sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, check_same_thread=False)
+              return sqlite3.connect(DB_PATH, check_same_thread=False)
+
+          def lambda_handler(event, context):
+              method = event.get("method")
+              req_id = event.get("id")
+              params = event.get("params", {})
+
+              if method == "initialize":
+                  return {"jsonrpc":"2.0","id":req_id,"result":{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"workshop-db-mcp","version":"1.0.0"}}}
+
+              if method == "tools/list":
+                  return {"jsonrpc":"2.0","id":req_id,"result":{"tools":TOOLS}}
+
+              if method == "tools/call":
+                  name = params["name"]
+                  args = params.get("arguments", {})
+                  try:
+                      if name == "list_tables":
+                          conn = get_conn()
+                          r = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+                          conn.close()
+                      elif name == "describe_table":
+                          conn = get_conn()
+                          cols = [{"name":row[1],"type":row[2]} for row in conn.execute(f"PRAGMA table_info({args['table_name']})").fetchall()]
+                          conn.row_factory = sqlite3.Row
+                          samples = [dict(row) for row in conn.execute(f"SELECT * FROM {args['table_name']} LIMIT 3").fetchall()]
+                          conn.close()
+                          r = {"columns":cols,"sample_rows":samples}
+                      elif name == "read_query":
+                          sql = args["sql"].strip()
+                          if not sql.upper().startswith(("SELECT","WITH")):
+                              r = {"error":"Only SELECT queries allowed"}
+                          else:
+                              conn = get_conn(readonly=True)
+                              conn.row_factory = sqlite3.Row
+                              r = [dict(row) for row in conn.execute(sql).fetchall()]
+                              conn.close()
+                      elif name == "write_query":
+                          sql = args["sql"].strip().upper()
+                          if not (sql.startswith("CREATE VIEW") or sql.startswith("INSERT")):
+                              r = {"error":"Only CREATE VIEW and INSERT allowed"}
+                          else:
+                              conn = get_conn(readonly=False)
+                              conn.execute(args["sql"])
+                              conn.commit()
+                              conn.close()
+                              r = {"success":True}
+                      else:
+                          return {"jsonrpc":"2.0","id":req_id,"error":{"code":-32601,"message":f"Unknown tool: {name}"}}
+                      return {"jsonrpc":"2.0","id":req_id,"result":{"content":[{"type":"text","text":json.dumps(r)}]}}
+                  except Exception as e:
+                      return {"jsonrpc":"2.0","id":req_id,"result":{"content":[{"type":"text","text":json.dumps({"error":str(e)})}]}}
+
+              return {"jsonrpc":"2.0","id":req_id,"error":{"code":-32601,"message":f"Unknown method: {method}"}}
+
+  McpServerBedrockPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref McpServerFunction
+      Action: lambda:InvokeFunction
+      Principal: bedrock.amazonaws.com
+
+Outputs:
+  McpServerArn:
+    Description: Lambda ARN - use this as the connector_id in your MCP tool configuration
+    Value: !GetAtt McpServerFunction.Arn

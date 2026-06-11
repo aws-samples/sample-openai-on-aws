@@ -1,0 +1,33 @@
+version: 2.0
+
+defaultLocaleCode: en-US
+localeCodes:
+  - en-US
+
+awsAccountConfig:
+  accountSources:
+    - workshop_studio
+  regionConfiguration:
+    deployableRegions:
+      recommended:
+        - us-east-2
+    minAccessibleRegions: 1
+    maxAccessibleRegions: 1
+  participantRole:
+    managedPolicies:
+      - "arn:aws:iam::aws:policy/AmazonBedrockFullAccess"
+      - "arn:aws:iam::aws:policy/AmazonBedrockMantleInferenceAccess"
+      - "arn:aws:iam::aws:policy/CloudWatchFullAccessV2"
+
+# infrastructure:
+#   cloudformationTemplates:
+#     - templateLocation: static/cfn/code-editor.yaml
+#       label: CodeEditor
+#       participantAllStackOutputsVisible: true
+#       parameters:
+#         - templateParameter: HomeFolder
+#           defaultValue: /workshop
+#         - templateParameter: AssetZipS3Path
+#           defaultValue: ""
+#         - templateParameter: RepoUrl
+#           defaultValue: "https://github.com/aws-samples/bedrock-openai-workshop.git"

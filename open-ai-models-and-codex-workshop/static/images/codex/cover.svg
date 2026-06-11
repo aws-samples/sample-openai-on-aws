@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 600">
+  <!-- Background - OpenAI Green -->
+  <rect width="1080" height="600" fill="#10a37f"/>
+
+  <!-- Terminal Window -->
+  <rect x="50" y="50" width="980" height="500" rx="12" fill="#1a1a1a"/>
+
+  <!-- Terminal Header Bar -->
+  <rect x="50" y="50" width="980" height="40" rx="12" fill="#2d2d2d"/>
+  <rect x="50" y="78" width="980" height="12" fill="#2d2d2d"/>
+
+  <!-- Traffic Lights -->
+  <circle cx="82" cy="70" r="8" fill="#ff5f56"/>
+  <circle cx="108" cy="70" r="8" fill="#ffbd2e"/>
+  <circle cx="134" cy="70" r="8" fill="#27ca40"/>
+
+  <!-- Welcome Box -->
+  <rect x="85" y="115" width="300" height="45" rx="5" stroke="#444" stroke-width="2" fill="none"/>
+  <text x="105" y="145" font-family="'Courier New', monospace" font-size="18" fill="#10a37f" font-weight="bold">*</text>
+  <text x="125" y="145" font-family="'Courier New', monospace" font-size="18" fill="#d4d4d4">Welcome to </text>
+  <text x="267" y="145" font-family="'Courier New', monospace" font-size="18" fill="#ffffff" font-weight="bold">Codex CLI</text>
+
+  <!-- Big Block Letters: CODEX -->
+  <g fill="#10a37f">
+    <!-- Letter C -->
+    <rect x="120" y="200" width="100" height="25"/>
+    <rect x="120" y="200" width="25" height="180"/>
+    <rect x="120" y="355" width="100" height="25"/>
+
+    <!-- Letter O -->
+    <rect x="250" y="200" width="100" height="25"/>
+    <rect x="250" y="200" width="25" height="180"/>
+    <rect x="325" y="200" width="25" height="180"/>
+    <rect x="250" y="355" width="100" height="25"/>
+
+    <!-- Letter D -->
+    <rect x="380" y="200" width="25" height="180"/>
+    <rect x="380" y="200" width="90" height="25"/>
+    <rect x="445" y="215" width="25" height="150"/>
+    <rect x="380" y="355" width="90" height="25"/>
+
+    <!-- Letter E -->
+    <rect x="510" y="200" width="100" height="25"/>
+    <rect x="510" y="200" width="25" height="180"/>
+    <rect x="510" y="275" width="75" height="25"/>
+    <rect x="510" y="355" width="100" height="25"/>
+
+    <!-- Letter X - using simple diagonal approach -->
+    <polygon points="640,200 670,200 720,275 770,200 800,200 735,295 800,380 770,380 720,305 670,380 640,380 705,295"/>
+  </g>
+
+  <!-- Press Enter text -->
+  <text x="120" y="440" font-family="'Courier New', monospace" font-size="20" fill="#666666">Press </text>
+  <text x="198" y="440" font-family="'Courier New', monospace" font-size="20" fill="#74b9ff">Enter</text>
+  <text x="270" y="440" font-family="'Courier New', monospace" font-size="20" fill="#666666"> to continue</text>
+
+  <!-- Powered by text -->
+  <text x="750" y="520" font-family="'Courier New', monospace" font-size="14" fill="#555555">Powered by Amazon Bedrock</text>
+</svg>
