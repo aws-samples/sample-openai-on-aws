@@ -5,9 +5,16 @@
 # Container Scanning customization: https://docs.gitlab.com/ee/user/application_security/container_scanning/#customizing-the-container-scanning-settings
 # Note that environment variables can be set in several places
 # See https://docs.gitlab.com/ee/ci/variables/#cicd-variable-precedence
+
+# container_scanning:
+#   variables:
+#     DOCKER_IMAGE: ...
+#     DOCKER_USER: ...
+#     DOCKER_PASSWORD: ...
 include:
 - template: Security/SAST-IaC.latest.gitlab-ci.yml
 - template: Security/SAST.gitlab-ci.yml
+- template: Jobs/Container-Scanning.gitlab-ci.yml
 stages:
 - test
 sast:
