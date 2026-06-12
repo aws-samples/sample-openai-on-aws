@@ -8,15 +8,47 @@ Parameters:
     Description: Name prefix for resources (from identity pool name)
 
 Resources:
+  DistributionSecretsKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "${AWS::StackName} distribution secrets key"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableIAMPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  DistributionSecretsKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-distribution-secrets'
+      TargetKeyId: !Ref DistributionSecretsKmsKey
+
   # S3 Bucket for access logs
   LoggingBucket:
     Type: AWS::S3::Bucket
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_18
+            comment: This bucket is the distribution access-log destination; recursive server access logging is intentionally not enabled.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: This bucket is the distribution access-log destination; recursive server access logging is intentionally not enabled.
     Properties:
       BucketName: !Sub '${IdentityPoolName}-distribution-logs-${AWS::AccountId}'
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -70,16 +102,47 @@ Resources:
         - Key: Purpose
           Value: PackageDistribution
 
+  LoggingBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LoggingBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt LoggingBucket.Arn
+              - !Sub '${LoggingBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
+  DistributionBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DistributionBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt DistributionBucket.Arn
+              - !Sub '${DistributionBucket.Arn}/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+
   # IAM Group for distribution users
   DistributionGroup:
     Type: AWS::IAM::Group
     Properties:
       GroupName: !Sub '${IdentityPoolName}-distributors'
-      Tags:
-        - Key: Application
-          Value: CodexWithBedrock
-        - Key: Purpose
-          Value: GeneratePresignedURLs
 
   # IAM User for distribution (presigned URLs)
   DistributionUser:
@@ -88,11 +151,6 @@ Resources:
       UserName: !Sub '${IdentityPoolName}-distributor'
       Groups:
         - !Ref DistributionGroup
-      Tags:
-        - Key: Application
-          Value: CodexWithBedrock
-        - Key: Purpose
-          Value: GeneratePresignedURLs
 
   # Access key for distribution user
   DistributionUserAccessKey:
@@ -121,6 +179,7 @@ Resources:
     Properties:
       Name: !Sub '${IdentityPoolName}-distributor-credentials'
       Description: IAM credentials for generating long-lived presigned URLs
+      KmsKeyId: !Ref DistributionSecretsKmsKey
       SecretString: !Sub |
         {
           "AccessKeyId": "${DistributionUserAccessKey}",

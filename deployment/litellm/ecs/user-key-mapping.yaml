@@ -8,6 +8,27 @@ Parameters:
     Description: Name of the DynamoDB table for user API key mappings
 
 Resources:
+  UserKeyMappingKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "${AWS::StackName} user key mapping table key"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableIAMPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+  UserKeyMappingKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${AWS::StackName}-user-key-mapping"
+      TargetKeyId: !Ref UserKeyMappingKmsKey
+
   UserKeyMappingTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -27,6 +48,7 @@ Resources:
       SSESpecification:
         SSEEnabled: true
         SSEType: KMS
+        KMSMasterKeyId: !GetAtt UserKeyMappingKmsKey.Arn
       Tags:
         - Key: project
           Value: codex-bedrock

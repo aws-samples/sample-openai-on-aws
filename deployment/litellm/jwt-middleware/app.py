@@ -84,7 +84,7 @@ def get_jwks():
             return response.json()
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch JWKS: {e}")
+        logger.warning(f"Failed to fetch JWKS: {e}")
         raise
 
 

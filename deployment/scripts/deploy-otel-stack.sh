@@ -21,7 +21,10 @@ Deploys three CloudFormation stacks (networking + collector + dashboard) to
 provide central OpenTelemetry collection and a CloudWatch dashboard for
 Codex-on-Bedrock usage.
 
-Required: none (all options have sensible defaults).
+Required:
+  --custom-domain FQDN         FQDN for the collector ALB (e.g. otel.codex.example.com).
+                               ACM cert is provisioned automatically via DNS validation.
+  --hosted-zone-id ID          Route 53 hosted zone ID that owns the FQDN.
 
 Common options:
   --region REGION              AWS region (default: us-west-2)
@@ -33,15 +36,7 @@ Common options:
   --output-price N             USD per 1M output tokens (default: 0.60, placeholder)
   --cached-input-price N       USD per 1M cached-input tokens (default: 0.075, placeholder)
 
-HTTPS + JWT validation (production hardening — opt-in):
-If any of the flags below are provided, ALL of --custom-domain and
---hosted-zone-id are required for HTTPS. Without them the collector deploys
-in HTTP-only mode, which is OK for sandbox but publishes Codex telemetry
-over the public internet unauthenticated (trust-on-distribution).
-
-  --custom-domain FQDN         FQDN for the collector ALB (e.g. otel.codex.example.com).
-                               ACM cert is provisioned automatically via DNS validation.
-  --hosted-zone-id ID          Route 53 hosted zone ID that owns the FQDN.
+JWT validation (optional production hardening):
   --oidc-issuer URL            OIDC issuer URL (e.g. https://cognito-idp.<region>.amazonaws.com/<pool-id>).
   --oidc-jwks URL              JWKS endpoint (typically <issuer>/.well-known/jwks.json).
   --oidc-client-id ID          OIDC app client ID — used as 'aud' claim validation at the ALB.
@@ -49,8 +44,11 @@ over the public internet unauthenticated (trust-on-distribution).
   -h, --help                   Show this help
 
 Examples:
-  # Sandbox deploy in us-west-2
-  deploy-otel-stack.sh --region us-west-2
+  # HTTPS collector in us-west-2
+  deploy-otel-stack.sh \
+      --region us-west-2 \
+      --custom-domain otel.codex.example.com \
+      --hosted-zone-id Z1234567890ABC
 
   # Production with HTTPS + Cognito JWT validation
   deploy-otel-stack.sh \
@@ -156,21 +154,16 @@ if ! aws sts get-caller-identity --region "$region" >/dev/null 2>&1; then
   exit 1
 fi
 
-# HTTPS / JWT correlation: ALB jwt-validation action is HTTPS-only.
-# Allow either to be set independently, but warn if JWT is requested without HTTPS.
-https_on=0; jwt_on=0
-[[ -n "$custom_domain" && -n "$hosted_zone_id" ]] && https_on=1
-if [[ -n "$custom_domain" && -z "$hosted_zone_id" ]] || [[ -z "$custom_domain" && -n "$hosted_zone_id" ]]; then
-  err "--custom-domain and --hosted-zone-id must be set together for HTTPS."
+# HTTPS is required by otel-collector.yaml.
+jwt_on=0
+if [[ -z "$custom_domain" || -z "$hosted_zone_id" ]]; then
+  err "--custom-domain and --hosted-zone-id are required for the HTTPS collector."
   exit 1
 fi
 [[ -n "$oidc_issuer" && -n "$oidc_jwks" ]] && jwt_on=1
 if [[ -n "$oidc_issuer" && -z "$oidc_jwks" ]] || [[ -z "$oidc_issuer" && -n "$oidc_jwks" ]]; then
   err "--oidc-issuer and --oidc-jwks must be set together."
   exit 1
-fi
-if (( jwt_on == 1 && https_on == 0 )); then
-  warn "--oidc-* flags require HTTPS (--custom-domain + --hosted-zone-id). JWT validation will be skipped."
 fi
 
 # Templates must exist
@@ -202,19 +195,15 @@ vpc_id=$(aws cloudformation describe-stacks --region "$region" --stack-name "$ne
 subnet_ids=$(aws cloudformation describe-stacks --region "$region" --stack-name "$net_stack" \
   --query "Stacks[0].Outputs[?OutputKey=='SubnetIds'].OutputValue" --output text)
 
-collector_params=(VpcId="$vpc_id" SubnetIds="$subnet_ids")
-[[ -n "$custom_domain" ]]    && collector_params+=(CustomDomainName="$custom_domain")
-[[ -n "$hosted_zone_id" ]]   && collector_params+=(HostedZoneId="$hosted_zone_id")
+collector_params=(VpcId="$vpc_id" SubnetIds="$subnet_ids" CustomDomainName="$custom_domain" HostedZoneId="$hosted_zone_id")
 [[ -n "$oidc_issuer" ]]      && collector_params+=(OidcIssuerUrl="$oidc_issuer")
 [[ -n "$oidc_jwks" ]]        && collector_params+=(OidcJwksEndpoint="$oidc_jwks")
 [[ -n "$oidc_client_id" ]]   && collector_params+=(OidcClientId="$oidc_client_id")
 
-if (( https_on == 1 && jwt_on == 1 )); then
+if (( jwt_on == 1 )); then
   log "Collector posture: HTTPS + JWT validation (domain=$custom_domain issuer=$oidc_issuer)"
-elif (( https_on == 1 )); then
-  log "Collector posture: HTTPS, no auth (encrypted in transit; attribution is header-based)"
 else
-  log "Collector posture: HTTP, no auth (sandbox default — data is NOT encrypted in transit)"
+  log "Collector posture: HTTPS, no auth (encrypted in transit; attribution is header-based)"
 fi
 
 log "Deploying collector stack: $col_stack (VPC $vpc_id)"

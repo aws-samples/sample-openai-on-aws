@@ -46,13 +46,46 @@ Parameters:
     Description: Client secret from Federate service profile (required if using Federate)
     NoEcho: true
 
+  LambdaReservedConcurrentExecutions:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    Description: Reserved concurrency limit for Lambda functions in this stack.
+
 Conditions:
   UseFederate: !Not [!Equals [!Ref FederateEnvironment, 'none']]
   NotUseFederate: !Equals [!Ref FederateEnvironment, 'none']
   UseFederateInteg: !Equals [!Ref FederateEnvironment, 'integ']
-  UseFederateProd: !Equals [!Ref FederateEnvironment, 'prod']
 
 Resources:
+  CognitoSetupKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "${AWS::StackName} Cognito setup Lambda and secrets key"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableIAMPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  CognitoSetupKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-cognito-setup'
+      TargetKeyId: !Ref CognitoSetupKmsKey
+
+  CognitoSetupLambdaDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${AWS::StackName}-cognito-setup-lambda-dlq'
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 1209600
+
   # Cognito User Pool with settings matching Amazon Federate requirements
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -253,11 +286,24 @@ Resources:
   UpdateClientFunction:
     Type: AWS::Lambda::Function
     Condition: UseFederate
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This custom-resource Lambda calls Cognito public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This custom-resource Lambda calls Cognito public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
     Properties:
-      Runtime: python3.9
+      Runtime: python3.12
       Handler: index.handler
       Role: !GetAtt UpdateClientRole.Arn
       Timeout: 60
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
+      KmsKeyArn: !GetAtt CognitoSetupKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt CognitoSetupLambdaDLQ.Arn
       Code:
         ZipFile: |
           import boto3
@@ -342,15 +388,41 @@ Resources:
                   - cognito-idp:UpdateUserPoolClient
                 Resource:
                   - !GetAtt UserPool.Arn
+        - PolicyName: LambdaFailureHandling
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt CognitoSetupLambdaDLQ.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !GetAtt CognitoSetupKmsKey.Arn
 
   # Lambda function to retrieve DistributionWebClient secret and store in Secrets Manager
   SecretStoreFunction:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This custom-resource Lambda calls Cognito and Secrets Manager public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This custom-resource Lambda calls Cognito and Secrets Manager public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
     Properties:
-      Runtime: python3.9
+      Runtime: python3.12
       Handler: index.handler
       Role: !GetAtt SecretStoreRole.Arn
       Timeout: 60
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
+      KmsKeyArn: !GetAtt CognitoSetupKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt CognitoSetupLambdaDLQ.Arn
       Code:
         ZipFile: |
           import boto3
@@ -366,6 +438,7 @@ Resources:
                   user_pool_id = event['ResourceProperties']['UserPoolId']
                   client_id = event['ResourceProperties']['ClientId']
                   secret_name = event['ResourceProperties']['SecretName']
+                  kms_key_id = event['ResourceProperties']['KmsKeyId']
 
                   cognito = boto3.client('cognito-idp')
                   secrets = boto3.client('secretsmanager')
@@ -385,6 +458,7 @@ Resources:
                       secret_response = secrets.create_secret(
                           Name=secret_name,
                           SecretString=client_secret,
+                          KmsKeyId=kms_key_id,
                           Description=f"Auto-generated secret for Cognito distribution web client {client_id}"
                       )
                       secret_arn = secret_response['ARN']
@@ -392,7 +466,8 @@ Resources:
                       # Secret exists, update it instead
                       secret_response = secrets.update_secret(
                           SecretId=secret_name,
-                          SecretString=client_secret
+                          SecretString=client_secret,
+                          KmsKeyId=kms_key_id
                       )
                       # Get ARN for existing secret
                       describe_response = secrets.describe_secret(SecretId=secret_name)
@@ -440,16 +515,25 @@ Resources:
                   - secretsmanager:TagResource
                 Resource:
                   - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*'
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: !GetAtt CognitoSetupKmsKey.Arn
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt CognitoSetupLambdaDLQ.Arn
 
   # Custom Resource to automatically store distribution web client secret
   DistributionWebClientSecret:
     Type: AWS::CloudFormation::CustomResource
-    DependsOn: DistributionWebClient
     Properties:
       ServiceToken: !GetAtt SecretStoreFunction.Arn
       UserPoolId: !Ref UserPool
       ClientId: !Ref DistributionWebClient
       SecretName: !Sub '${AWS::StackName}-distribution-web-client-secret'
+      KmsKeyId: !Ref CognitoSetupKmsKey
 
 Outputs:
   UserPoolId:

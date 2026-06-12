@@ -17,34 +17,7 @@ from format_utils import format_number, format_percentage
 
 def get_model_display_name(model_id):
     """Convert model ID to display name."""
-    # Remove common prefixes
-    model_display = model_id.replace("us.anthropic.", "").replace("eu.anthropic.", "").replace("apac.anthropic.", "").replace("anthropic.", "")
-    
-    # Detect model family and version
-    model_lower = model_display.lower()
-    
-    # TODO: Replace with actual model name once confirmed
-    # All current entries map to the generic placeholder until the model is finalized
-    if "opus-4-6" in model_lower or "opus-4.6" in model_lower:
-        return "Bedrock LLM"
-    elif "opus-4-1" in model_lower or "opus-4.1" in model_lower:
-        return "Bedrock LLM"
-    elif "opus-4" in model_lower:
-        return "Bedrock LLM"
-    elif "sonnet-4-5" in model_lower or "sonnet-4.5" in model_lower:
-        return "Bedrock LLM"
-    elif "sonnet-4" in model_lower:
-        return "Bedrock LLM"
-    elif "sonnet-3.7" in model_lower or "sonnet-3-7" in model_lower:
-        return "Bedrock LLM"
-    elif "sonnet-3.5" in model_lower or "sonnet-3-5" in model_lower:
-        return "Bedrock LLM"
-    elif "haiku-3.5" in model_lower or "haiku-3-5" in model_lower:
-        return "Bedrock LLM"
-    elif "haiku-3" in model_lower or "haiku-3.0" in model_lower:
-        return "Bedrock LLM"
-    else:
-        return "Bedrock LLM"
+    return "Bedrock LLM"
 
 
 def get_model_color(model_name):

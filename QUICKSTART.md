@@ -254,8 +254,9 @@ aws cloudformation deploy \
   --region "$AWS_REGION"
 
 # Build and push the LiteLLM image to ECR first; see the full guide for the
-# docker buildx commands and the LiteLLMImage / LiteLLMMasterKey / DBPassword
-# values required by litellm-ecs.yaml.
+  # docker buildx commands and the LiteLLMImage / LiteLLMMasterKey /
+  # DBUsername / DBPassword / AlbCertificateArn values required by
+  # litellm-ecs.yaml.
 aws cloudformation deploy \
   --stack-name codex-litellm-gateway \
   --template-file deployment/litellm/ecs/litellm-ecs.yaml \
@@ -265,7 +266,10 @@ aws cloudformation deploy \
       NetworkingStackName=codex-networking \
       AwsRegion="$AWS_REGION" \
       LiteLLMImage="$LITELLM_IMAGE" \
+      AlbCertificateArn="$ALB_CERTIFICATE_ARN" \
+      AlbDomainName="$GATEWAY_DOMAIN_NAME" \
       LiteLLMMasterKey="$LITELLM_MASTER_KEY" \
+      DBUsername=litellm \
       DBPassword="$DB_PASSWORD"
 ```
 

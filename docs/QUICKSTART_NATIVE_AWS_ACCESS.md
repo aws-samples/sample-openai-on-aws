@@ -378,7 +378,9 @@ aws cloudformation deploy \
   --region "$AWS_REGION" \
   --parameter-overrides \
       VpcId="$VPC_ID" \
-      SubnetIds="$SUBNET_IDS"
+      SubnetIds="$SUBNET_IDS" \
+      CustomDomainName=otel.codex.example.com \
+      HostedZoneId=Z0123456789ABCDEFGHIJ
 
 # Capture the collector ALB URL
 COLLECTOR_ENDPOINT=$(aws cloudformation describe-stacks \
@@ -393,15 +395,15 @@ Append the following block. Substitute the collector endpoint captured above.
 
 ```toml
 [otel.exporter.otlp-http]
-endpoint = "http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com/v1/logs"
+endpoint = "https://otel.codex.example.com/v1/logs"
 protocol = "binary"
 
 [otel.metrics_exporter.otlp-http]
-endpoint = "http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com/v1/metrics"
+endpoint = "https://otel.codex.example.com/v1/metrics"
 protocol = "binary"
 
 [otel.trace_exporter.otlp-http]
-endpoint = "http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com/v1/traces"
+endpoint = "https://otel.codex.example.com/v1/traces"
 protocol = "binary"
 ```
 
