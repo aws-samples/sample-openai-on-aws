@@ -141,7 +141,7 @@ Resources:
         skip:
           - id: CKV_AWS_260
             comment: Internet-facing OTEL collector ALB requires HTTPS ingress from 0.0.0.0/0; collectors authenticate via mutual TLS or network controls.
-      cfnlint:
+      cfn-lint:
         ignore_checks:
           - EA022
         ignore_reasons:
