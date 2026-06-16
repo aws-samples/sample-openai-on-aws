@@ -196,6 +196,9 @@ Resources:
         rules_to_suppress:
           - id: W77
             reason: Secret contains externally-supplied API keys and DB password provided as stack parameters; automated rotation requires application-specific Lambda not deployed here.
+      guard:
+        SuppressedRules:
+          - SECRETSMANAGER_ROTATION_ENABLED_CHECK: "Secret contains externally-supplied API keys and DB password; automated rotation requires application-specific Lambda not deployed here."
     Properties:
       Name: !Sub "${AWS::StackName}/litellm-secrets"
       KmsKeyId: !Ref LiteLLMKmsKey
@@ -307,7 +310,11 @@ Resources:
         rules_to_suppress:
           - id: W35
             reason: This bucket is the ALB access-log destination; recursive server access logging is intentionally not enabled.
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_NO_PUBLIC_RW_ACL: "AccessControl is explicitly set to Private; cfn-guard false positive triggered by missing property check."
     Properties:
+      AccessControl: Private
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -420,6 +427,14 @@ Resources:
 
   TaskHttpsEgress:
     Type: AWS::EC2::SecurityGroupEgress
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: LiteLLM tasks require HTTPS egress to AWS APIs (Bedrock, Secrets Manager) and external HTTPS endpoints.
+      guard:
+        SuppressedRules:
+          - EC2_SECURITY_GROUP_EGRESS_OPEN_TO_WORLD_RULE: "LiteLLM tasks require HTTPS egress to AWS Bedrock and Secrets Manager APIs; restricted to port 443 only."
     Properties:
       GroupId: !Ref TaskSecurityGroup
       IpProtocol: tcp

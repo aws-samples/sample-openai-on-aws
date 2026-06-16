@@ -295,6 +295,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This custom-resource Lambda calls Cognito public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       Runtime: python3.12
       Handler: index.handler
@@ -415,6 +418,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This custom-resource Lambda calls Cognito and Secrets Manager public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       Runtime: python3.12
       Handler: index.handler

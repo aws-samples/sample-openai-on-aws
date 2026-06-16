@@ -311,7 +311,11 @@ Resources:
         rules_to_suppress:
           - id: W35
             reason: This bucket is the CloudTrail log destination; recursive server access logging is intentionally not enabled.
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_NO_PUBLIC_RW_ACL: "AccessControl is explicitly set to Private; cfn-guard false positive triggered by missing property check."
     Properties:
+      AccessControl: Private
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
@@ -424,6 +428,9 @@ Resources:
         rules_to_suppress:
           - id: W28
             reason: CloudTrail encryption is enabled via KMSKeyId; scanner may not detect this pattern correctly.
+      guard:
+        SuppressedRules:
+          - CLOUD_TRAIL_ENCRYPTION_ENABLED: "KMSKeyId is set to !GetAtt BedrockAccessLogsKmsKey.Arn; cfn-guard cannot resolve GetAtt to a string at analysis time."
     DependsOn: CloudTrailBucketPolicy
     Properties:
       TrailName: codex-bedrock-trail

@@ -262,6 +262,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch and DynamoDB public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-MetricsAggregator
@@ -313,6 +316,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-TotalTokens
@@ -344,6 +350,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-OperationsCount
@@ -374,6 +383,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch and DynamoDB public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-ActiveUsers
@@ -406,6 +418,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-TokenByModel
@@ -436,6 +451,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-CacheEfficiency
@@ -467,6 +485,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch and DynamoDB public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-TopUsers
@@ -499,6 +520,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-OperationsByType
@@ -529,6 +553,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-TokenUsageByType
@@ -559,6 +586,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-CodeGenByLanguage
@@ -589,6 +619,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-LinesOfCode
@@ -619,6 +652,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-Commits
@@ -649,6 +685,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-CodeAcceptance
@@ -679,6 +718,9 @@ Resources:
         rules_to_suppress:
           - id: W89
             reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-ActiveHours

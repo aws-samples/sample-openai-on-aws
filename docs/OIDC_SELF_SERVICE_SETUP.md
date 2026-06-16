@@ -157,7 +157,7 @@ curl https://<gateway-url>/api/my-key \
 # Developers can use JWT tokens directly for API calls
 # (middleware auto-creates key on first request)
 
-export JWT_TOKEN="eyJhbGc..."
+export JWT_TOKEN="eyJhbGc..."  # gitleaks:allow
 
 curl https://<gateway-url>/v1/chat/completions \
   -H "Authorization: Bearer $JWT_TOKEN" \

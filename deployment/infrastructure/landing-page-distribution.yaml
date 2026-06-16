@@ -163,6 +163,10 @@ Resources:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
+    Metadata:
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_NO_PUBLIC_RW_ACL: "AccessControl is explicitly set to Private; cfn-guard false positive triggered by missing property check."
     Properties:
       BucketName: !Sub '${IdentityPoolName}-landing-page-dist-${AWS::AccountId}'
       BucketEncryption:
@@ -171,6 +175,14 @@ Resources:
               SSEAlgorithm: AES256
       VersioningConfiguration:
         Status: Enabled
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: 1
+      AccessControl: Private
       LoggingConfiguration:
         DestinationBucketName: !Ref ALBLogsBucket
         LogFilePrefix: distribution/
@@ -197,6 +209,9 @@ Resources:
         rules_to_suppress:
           - id: W35
             reason: This bucket is the ALB access-log destination; recursive server access logging is intentionally not enabled.
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_NO_PUBLIC_RW_ACL: "AccessControl is explicitly set to Private; cfn-guard false positive triggered by missing property check."
     Properties:
       BucketName: !Sub '${IdentityPoolName}-alb-logs-${AWS::AccountId}'
       BucketEncryption:
@@ -205,6 +220,14 @@ Resources:
               SSEAlgorithm: AES256
       VersioningConfiguration:
         Status: Enabled
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: 1
+      AccessControl: Private
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -353,6 +376,10 @@ Resources:
   LandingPageFunction:
     Type: AWS::Lambda::Function
     DependsOn: LandingPageLogGroup
+    Metadata:
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       FunctionName: !Sub '${IdentityPoolName}-landing-page'
       Runtime: python3.12
@@ -1069,6 +1096,10 @@ Resources:
   CognitoCallbackUpdaterFunction:
     Type: AWS::Lambda::Function
     Condition: IsCognito
+    Metadata:
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
       Runtime: python3.12
       Handler: index.handler

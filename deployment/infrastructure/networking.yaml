@@ -89,6 +89,9 @@ Resources:
         rules_to_suppress:
           - id: W0
             reason: Default public route to internet gateway is required for internet-facing subnets.
+      guard:
+        SuppressedRules:
+          - NO_UNRESTRICTED_ROUTE_TO_IGW: "Default public route 0.0.0.0/0 to internet gateway is required for public subnets; subnets are explicitly designated as public-facing."
     DependsOn: InternetGatewayAttachment
     Properties:
       RouteTableId: !Ref PublicRouteTable
