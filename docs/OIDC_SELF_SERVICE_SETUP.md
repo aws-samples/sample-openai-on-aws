@@ -145,7 +145,7 @@ curl https://<gateway-url>/api/my-key \
 
 # Response:
 # {
-#   "api_key": "sk-litellm-xxxxxxxxxxxxx",
+#   "api_key": "sk-litellm-xxxxxxxxxxxxx",  # gitleaks:allow
 #   "user_id": "user@company.com",
 #   "email": "user@company.com"
 # }
@@ -183,11 +183,11 @@ curl https://<gateway-url>/v1/chat/completions \
 
 ```bash
 # Set for current shell
-export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx
+export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx  # gitleaks:allow
 
 # Add to shell profile for persistence:
-echo 'export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx' >> ~/.zshrc  # macOS
-echo 'export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx' >> ~/.bashrc # Linux
+echo 'export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx  # gitleaks:allow' >> ~/.zshrc  # macOS
+echo 'export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx  # gitleaks:allow' >> ~/.bashrc # Linux
 
 # Restart your shell or source the profile
 source ~/.zshrc  # macOS

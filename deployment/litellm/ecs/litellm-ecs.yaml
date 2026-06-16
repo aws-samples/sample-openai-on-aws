@@ -187,12 +187,70 @@ Resources:
 
   LiteLLMSecret:
     Type: AWS::SecretsManager::Secret
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_108
+            comment: Secret contains externally-supplied API keys and DB password provided as stack parameters; automated rotation requires application-specific Lambda not deployed here.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W77
+            reason: Secret contains externally-supplied API keys and DB password provided as stack parameters; automated rotation requires application-specific Lambda not deployed here.
     Properties:
       Name: !Sub "${AWS::StackName}/litellm-secrets"
       KmsKeyId: !Ref LiteLLMKmsKey
       SecretString: !Sub '{"LITELLM_MASTER_KEY":"${LiteLLMMasterKey}","BEDROCK_MANTLE_API_KEY":"${BedrockMantleApiKey}"}'
 
   # --- IAM ---
+
+  TaskExecutionSecretsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} ECS task execution secrets access"
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Resource: !Ref LiteLLMSecret
+
+  TaskBedrockAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} ECS task Bedrock access"
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource: !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+          - Effect: Allow
+            Action:
+              - bedrock:CallWithBearerToken
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AwsRegion
+
+  TaskDynamoDBAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: UseJwtMiddleware
+    Properties:
+      Description: !Sub "${AWS::StackName} ECS task DynamoDB access for JWT middleware"
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:Query
+              - dynamodb:Scan
+            Resource: !Sub
+              - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}"
+              - TableName: !ImportValue
+                  Fn::Sub: "${UserKeyMappingStackName}-TableName"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -206,15 +264,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-      Policies:
-        - PolicyName: SecretsAccess
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                  - secretsmanager:DescribeSecret
-                Resource: !Ref LiteLLMSecret
+        - !Ref TaskExecutionSecretsPolicy
 
   TaskRole:
     Type: AWS::IAM::Role
@@ -226,39 +276,9 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: BedrockAccess
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                  - bedrock:InvokeModelWithResponseStream
-                Resource: !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
-              - Effect: Allow
-                Action:
-                  - bedrock:CallWithBearerToken
-                Resource: "*"
-                Condition:
-                  StringEquals:
-                    aws:RequestedRegion: !Ref AwsRegion
-        # DynamoDB access for JWT middleware (conditional)
-        - !If
-          - UseJwtMiddleware
-          - PolicyName: DynamoDBAccess
-            PolicyDocument:
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - dynamodb:GetItem
-                    - dynamodb:PutItem
-                    - dynamodb:Query
-                    - dynamodb:Scan
-                  Resource: !Sub
-                    - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}"
-                    - TableName: !ImportValue
-                        Fn::Sub: "${UserKeyMappingStackName}-TableName"
-          - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Ref TaskBedrockAccessPolicy
+        - !If [UseJwtMiddleware, !Ref TaskDynamoDBAccessPolicy, !Ref AWS::NoValue]
 
   # --- Security Groups ---
 
@@ -304,6 +324,13 @@ Resources:
           - Id: DeleteALBAccessLogs
             Status: Enabled
             ExpirationInDays: 90
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: 1
 
   ALBLogsBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -446,6 +473,7 @@ Resources:
         - !Ref DBSecurityGroup
       DeletionProtection: true
       BackupRetentionPeriod: 7
+      AutoMinorVersionUpgrade: true
 
   # --- ECS ---
 

@@ -28,6 +28,14 @@ Parameters:
     MinValue: 1
     Description: Reserved concurrency limit for Lambda functions in this stack.
 
+  AlarmSNSTopicArn:
+    Type: String
+    Default: ''
+    Description: Optional SNS topic ARN for CloudWatch alarm notifications. Leave empty to skip alarm actions.
+
+Conditions:
+  HasAlarmSNS: !Not [!Equals [!Ref AlarmSNSTopicArn, '']]
+
 Resources:
   MetricsAggregationKmsKey:
     Type: AWS::KMS::Key
@@ -76,40 +84,36 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: CloudWatchLogsAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:StartQuery
-                  - logs:GetQueryResults
-                  - logs:StopQuery
-                  - logs:DescribeLogGroups
-                  - logs:DescribeLogStreams
-                Resource: '*'
-        - PolicyName: CloudWatchMetricsAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cloudwatch:PutMetricData
-                Resource: '*'
-        - PolicyName: LambdaFailureHandling
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:SendMessage
-                Resource: !GetAtt MetricsAggregatorDLQ.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:GenerateDataKey
-                Resource: !GetAtt MetricsAggregationKmsKey.Arn
+        - !Ref MetricsAggregatorPolicy
+
+  MetricsAggregatorPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} metrics aggregator Lambda permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:StartQuery
+              - logs:GetQueryResults
+              - logs:StopQuery
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt MetricsAggregatorDLQ.Arn
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !GetAtt MetricsAggregationKmsKey.Arn
 
   MetricsAggregatorDLQ:
     Type: AWS::SQS::Queue
@@ -197,6 +201,12 @@ Resources:
         - Name: FunctionName
           Value: !Ref MetricsAggregatorFunction
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlarmSNS, !Ref AlarmSNSTopicArn, !Ref AWS::NoValue]
+      OKActions:
+        - !If [HasAlarmSNS, !Ref AlarmSNSTopicArn, !Ref AWS::NoValue]
+      InsufficientDataActions:
+        - !If [HasAlarmSNS, !Ref AlarmSNSTopicArn, !Ref AWS::NoValue]
 
   MetricsAggregatorDurationAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -213,6 +223,12 @@ Resources:
         - Name: FunctionName
           Value: !Ref MetricsAggregatorFunction
       TreatMissingData: notBreaching
+      AlarmActions:
+        - !If [HasAlarmSNS, !Ref AlarmSNSTopicArn, !Ref AWS::NoValue]
+      OKActions:
+        - !If [HasAlarmSNS, !Ref AlarmSNSTopicArn, !Ref AWS::NoValue]
+      InsufficientDataActions:
+        - !If [HasAlarmSNS, !Ref AlarmSNSTopicArn, !Ref AWS::NoValue]
 
   # Custom metrics dashboard for monitoring aggregation health
   MetricsAggregationDashboard:

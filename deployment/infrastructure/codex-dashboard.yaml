@@ -45,6 +45,87 @@ Resources:
       AliasName: !Sub 'alias/${AWS::StackName}-dashboard'
       TargetKeyId: !Ref DashboardKmsKey
 
+  CustomWidgetPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} CloudWatch dashboard widget Lambda permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:StartQuery
+              - logs:GetQueryResults
+              - logs:StopQuery
+              - logs:DescribeLogGroups
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - servicequotas:GetServiceQuota
+              - servicequotas:ListServiceQuotas
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - cloudwatch:GetMetricStatistics
+              - cloudwatch:GetMetricData
+              - cloudwatch:ListMetrics
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - dynamodb:Query
+              - dynamodb:GetItem
+              - dynamodb:BatchGetItem
+              - dynamodb:Scan
+            Resource:
+              - !GetAtt MetricsTable.Arn
+              - !Sub '${MetricsTable.Arn}/index/*'
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt DashboardLambdaDLQ.Arn
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !GetAtt DashboardKmsKey.Arn
+
+  MetricsAggregatorRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} metrics aggregator Lambda permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:StartQuery
+              - logs:GetQueryResults
+              - logs:StopQuery
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:BatchWriteItem
+              - dynamodb:UpdateItem
+              - dynamodb:GetItem
+            Resource:
+              - !GetAtt MetricsTable.Arn
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt DashboardLambdaDLQ.Arn
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !GetAtt DashboardKmsKey.Arn
+
   # DynamoDB Table for Metrics Storage
   MetricsTable:
     Type: AWS::DynamoDB::Table
@@ -147,63 +228,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: CloudWatchLogsQuery
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:StartQuery
-                  - logs:GetQueryResults
-                  - logs:StopQuery
-                  - logs:DescribeLogGroups
-                Resource: '*'
-        - PolicyName: ServiceQuotasAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - servicequotas:GetServiceQuota
-                  - servicequotas:ListServiceQuotas
-                Resource: '*'
-        - PolicyName: CloudWatchMetricsAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cloudwatch:GetMetricStatistics
-                  - cloudwatch:GetMetricData
-                  - cloudwatch:ListMetrics
-                Resource: '*'
-        - PolicyName: DynamoDBReadAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:Query
-                  - dynamodb:GetItem
-                  - dynamodb:BatchGetItem
-                  - dynamodb:Scan
-                Resource:
-                  - !GetAtt MetricsTable.Arn
-                  - !Sub '${MetricsTable.Arn}/index/*'
-        - PolicyName: LambdaFailureHandling
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:SendMessage
-                Resource: !GetAtt DashboardLambdaDLQ.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:GenerateDataKey
-                Resource: !GetAtt DashboardKmsKey.Arn
+        - !Ref CustomWidgetPolicy
 
   MetricsAggregatorRole:
     Type: AWS::IAM::Role
@@ -217,52 +242,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: CloudWatchLogsAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:StartQuery
-                  - logs:GetQueryResults
-                  - logs:StopQuery
-                  - logs:DescribeLogGroups
-                  - logs:DescribeLogStreams
-                Resource: '*'
-        - PolicyName: CloudWatchMetricsPublish
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cloudwatch:PutMetricData
-                Resource: '*'
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:PutItem
-                  - dynamodb:BatchWriteItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:GetItem
-                Resource:
-                  - !GetAtt MetricsTable.Arn
-        - PolicyName: LambdaFailureHandling
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:SendMessage
-                Resource: !GetAtt DashboardLambdaDLQ.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:GenerateDataKey
-                Resource: !GetAtt DashboardKmsKey.Arn
+        - !Ref MetricsAggregatorRolePolicy
 
   DashboardLambdaDLQ:
     Type: AWS::SQS::Queue

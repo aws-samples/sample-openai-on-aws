@@ -292,10 +292,10 @@ def aggregate_active_users(start_ms, end_ms):
             user_data[user_email]["tokens"] += tokens
 
             # Track token types for cost calculation
-            if token_type == "input":
+            if token_type == "input":  # nosec B105
                 user_data[user_email]["input_tokens"] += tokens
                 user_data[user_email]["requests"] += requests  # Count requests only for input
-            elif token_type == "output":
+            elif token_type == "output":  # nosec B105
                 user_data[user_email]["output_tokens"] += tokens
             elif token_type in ("cacheRead", "cache_read"):
                 user_data[user_email]["cache_tokens"] += tokens
@@ -393,7 +393,7 @@ def aggregate_cache_metrics(start_ms, end_ms):
 
         if token_type and total > 0:
             # Map token types to metric names
-            if token_type == "input":
+            if token_type == "input":  # nosec B105
                 metrics.append(
                     {
                         "MetricName": "InputTokens",
@@ -402,7 +402,7 @@ def aggregate_cache_metrics(start_ms, end_ms):
                         "Timestamp": timestamp,
                     }
                 )
-            elif token_type == "output":
+            elif token_type == "output":  # nosec B105
                 metrics.append(
                     {
                         "MetricName": "OutputTokens",
@@ -411,7 +411,7 @@ def aggregate_cache_metrics(start_ms, end_ms):
                         "Timestamp": timestamp,
                     }
                 )
-            elif token_type == "cacheRead":
+            elif token_type == "cacheRead":  # nosec B105
                 metrics.append(
                     {
                         "MetricName": "CacheReadTokens",
@@ -420,7 +420,7 @@ def aggregate_cache_metrics(start_ms, end_ms):
                         "Timestamp": timestamp,
                     }
                 )
-            elif token_type == "cacheCreation":
+            elif token_type == "cacheCreation":  # nosec B105
                 metrics.append(
                     {
                         "MetricName": "CacheCreationTokens",
@@ -686,7 +686,7 @@ def aggregate_model_rate_metrics(start_ms, end_ms):
                 model_metrics[model][minute_str]["tokens"] += tokens
 
                 # Count requests (only for input tokens to avoid double counting)
-                if token_type == "input":
+                if token_type == "input":  # nosec B105
                     model_metrics[model][minute_str]["requests"] += 1
             except Exception as e:
                 print(f"Error parsing timestamp {timestamp}: {str(e)}")

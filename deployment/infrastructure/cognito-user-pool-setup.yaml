@@ -363,6 +363,30 @@ Resources:
                       'Message': str(e)
                   })
 
+  UpdateClientRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: UseFederate
+    Properties:
+      Description: !Sub "${AWS::StackName} Cognito client update Lambda permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:DescribeUserPoolClient
+              - cognito-idp:UpdateUserPoolClient
+            Resource:
+              - !GetAtt UserPool.Arn
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt CognitoSetupLambdaDLQ.Arn
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !GetAtt CognitoSetupKmsKey.Arn
+
   # IAM role for Lambda
   UpdateClientRole:
     Type: AWS::IAM::Role
@@ -377,30 +401,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: UpdateCognitoClient
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cognito-idp:DescribeUserPoolClient
-                  - cognito-idp:UpdateUserPoolClient
-                Resource:
-                  - !GetAtt UserPool.Arn
-        - PolicyName: LambdaFailureHandling
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:SendMessage
-                Resource: !GetAtt CognitoSetupLambdaDLQ.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:GenerateDataKey
-                Resource: !GetAtt CognitoSetupKmsKey.Arn
+        - !Ref UpdateClientRolePolicy
 
   # Lambda function to retrieve DistributionWebClient secret and store in Secrets Manager
   SecretStoreFunction:
@@ -484,6 +485,36 @@ Resources:
                       'Message': str(e)
                   })
 
+  SecretStoreRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} Cognito secret store Lambda permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:DescribeUserPoolClient
+            Resource:
+              - !GetAtt UserPool.Arn
+          - Effect: Allow
+            Action:
+              - secretsmanager:CreateSecret
+              - secretsmanager:UpdateSecret
+              - secretsmanager:DescribeSecret
+              - secretsmanager:TagResource
+            Resource:
+              - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*'
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !GetAtt CognitoSetupKmsKey.Arn
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt CognitoSetupLambdaDLQ.Arn
+
   # IAM role for SecretStoreFunction
   SecretStoreRole:
     Type: AWS::IAM::Role
@@ -497,33 +528,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: CognitoAndSecretsAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cognito-idp:DescribeUserPoolClient
-                Resource:
-                  - !GetAtt UserPool.Arn
-              - Effect: Allow
-                Action:
-                  - secretsmanager:CreateSecret
-                  - secretsmanager:UpdateSecret
-                  - secretsmanager:DescribeSecret
-                  - secretsmanager:TagResource
-                Resource:
-                  - !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:*'
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:GenerateDataKey
-                Resource: !GetAtt CognitoSetupKmsKey.Arn
-              - Effect: Allow
-                Action:
-                  - sqs:SendMessage
-                Resource: !GetAtt CognitoSetupLambdaDLQ.Arn
+        - !Ref SecretStoreRolePolicy
 
   # Custom Resource to automatically store distribution web client secret
   DistributionWebClientSecret:

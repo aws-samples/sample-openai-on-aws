@@ -270,6 +270,30 @@ Resources:
               Bool:
                 aws:SecureTransport: false
 
+  LambdaExecutionPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} landing page Lambda S3 and DLQ permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:ListBucket
+            Resource:
+              - !GetAtt DistributionBucket.Arn
+              - !Sub '${DistributionBucket.Arn}/*'
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt LandingPageDLQ.Arn
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !GetAtt LandingPageKmsKey.Arn
+
   # Lambda Execution Role
   LambdaExecutionRole:
     Type: AWS::IAM::Role
@@ -283,31 +307,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-      Policies:
-        - PolicyName: S3ReadAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
-                Resource:
-                  - !GetAtt DistributionBucket.Arn
-                  - !Sub '${DistributionBucket.Arn}/*'
-        - PolicyName: LambdaFailureHandling
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:SendMessage
-                Resource: !GetAtt LandingPageDLQ.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:GenerateDataKey
-                Resource: !GetAtt LandingPageKmsKey.Arn
+        - !Ref LambdaExecutionPolicy
       Tags:
         - Key: Application
           Value: CodexWithBedrock
@@ -321,6 +321,11 @@ Resources:
 
   LambdaSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Lambda requires HTTPS egress to call AWS service APIs (S3, Cognito, STS).
     Properties:
       GroupDescription: Security group for landing page Lambda
       VpcId: !Ref VpcId
@@ -829,6 +834,19 @@ Resources:
   # ALB Security Group
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_260
+            comment: Internet-facing ALB requires HTTPS ingress from 0.0.0.0/0; authenticated via OIDC.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W2
+            reason: Internet-facing ALB requires HTTPS ingress from 0.0.0.0/0; protected by OIDC authentication.
+          - id: W9
+            reason: Internet-facing ALB requires HTTPS ingress from 0.0.0.0/0; protected by OIDC authentication.
+          - id: W5
+            reason: ALB requires HTTPS egress to reach Cognito auth endpoints and Lambda target.
     Properties:
       GroupName: !Sub '${IdentityPoolName}-landing-page-alb-sg'
       GroupDescription: Security group for distribution landing page ALB
@@ -1007,6 +1025,30 @@ Resources:
         DNSName: !GetAtt DistributionALB.DNSName
         EvaluateTargetHealth: false
 
+  CognitoCallbackUpdaterPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: IsCognito
+    Properties:
+      Description: !Sub "${AWS::StackName} Cognito callback updater Lambda permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - cognito-idp:UpdateUserPoolClient
+              - cognito-idp:DescribeUserPoolClient
+            Resource:
+              - !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}'
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt LandingPageDLQ.Arn
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !GetAtt LandingPageKmsKey.Arn
+
   # Lambda function to update Cognito User Pool Client callback URLs
   CognitoCallbackUpdaterRole:
     Type: AWS::IAM::Role
@@ -1022,30 +1064,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
         - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-      Policies:
-        - PolicyName: UpdateCognitoClient
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cognito-idp:UpdateUserPoolClient
-                  - cognito-idp:DescribeUserPoolClient
-                Resource:
-                  - !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}'
-        - PolicyName: LambdaFailureHandling
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - sqs:SendMessage
-                Resource: !GetAtt LandingPageDLQ.Arn
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:GenerateDataKey
-                Resource: !GetAtt LandingPageKmsKey.Arn
+        - !Ref CognitoCallbackUpdaterPolicy
 
   CognitoCallbackUpdaterFunction:
     Type: AWS::Lambda::Function

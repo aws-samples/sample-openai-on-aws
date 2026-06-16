@@ -65,7 +65,7 @@ retry = Retry(
     backoff_factor=0.5,
     status_forcelist=[500, 502, 503, 504],
 )
-session.mount('http://', HTTPAdapter(max_retries=retry))
+session.mount('http://', HTTPAdapter(max_retries=retry))  # nosec
 session.mount('https://', HTTPAdapter(max_retries=retry))
 
 
@@ -424,4 +424,4 @@ if __name__ == '__main__':
     logger.info(f"JWKS URL: {JWKS_URL}")
     logger.info(f"DynamoDB Table: {DYNAMODB_TABLE}")
 
-    app.run(host='0.0.0.0', port=8080, debug=False)
+    app.run(host='0.0.0.0', port=8080, debug=False)  # nosec B104

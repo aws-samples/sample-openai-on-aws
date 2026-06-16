@@ -241,6 +241,13 @@ Resources:
           - Id: DeleteALBAccessLogs
             Status: Enabled
             ExpirationInDays: 90
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: 1
 
   ALBLogsBucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -349,6 +356,73 @@ Resources:
         - - Type: forward
             TargetGroupArn: !Ref HTTPTargetGroup
 
+  # IAM Managed Policies
+  TaskExecutionLogsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} ECS task execution CloudWatch logs permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - !GetAtt CollectorLogGroup.Arn
+              - !Sub '${CollectorLogGroup.Arn}:*'
+
+  TaskExecutionSSMPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} ECS task execution SSM parameter read permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-config'
+
+  TaskMetricsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} ECS task CloudWatch metrics and logs permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+              - logs:CreateLogGroup
+              - logs:PutRetentionPolicy
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codex/metrics'
+              - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codex/metrics:*'
+              - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/litellm/metrics'
+              - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/litellm/metrics:*'
+
+  TaskSSMPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} ECS task SSM parameter read permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+            Resource:
+              - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-config'
+
   # IAM Roles
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -362,28 +436,8 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-      Policies:
-        - PolicyName: CloudWatchLogs
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  - !GetAtt CollectorLogGroup.Arn
-                  - !Sub '${CollectorLogGroup.Arn}:*'
-        - PolicyName: SSMParameterAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-config'
+        - !Ref TaskExecutionLogsPolicy
+        - !Ref TaskExecutionSSMPolicy
 
   TaskRole:
     Type: AWS::IAM::Role
@@ -396,39 +450,9 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
           # Remove overly permissive trust policy that allowed any AWS account
-      Policies:
-        - PolicyName: CloudWatchMetrics
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cloudwatch:PutMetricData
-                Resource: '*'
-              # EMF exporter needs CloudWatch Logs permissions
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                  - logs:CreateLogGroup
-                  - logs:PutRetentionPolicy
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codex/metrics'
-                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codex/metrics:*'
-                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/litellm/metrics'
-                  - !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/litellm/metrics:*'
-        # We keep the CloudWatch permissions but remove the AssumeRole permission
-        # that was related to the overly permissive trust policy
-        - PolicyName: SSMParameterAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                Resource:
-                  - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}-config'
+      ManagedPolicyArns:
+        - !Ref TaskMetricsPolicy
+        - !Ref TaskSSMPolicy
 
   # SSM Parameter for Configuration
   OTelConfig:
@@ -579,6 +603,11 @@ Resources:
   # ECS Service
   ECSService:
     Type: AWS::ECS::Service
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: EA022
+            reason: ECS service health check grace period is explicitly set; cfnlint EA022 is a false positive for this pattern.
     DependsOn:
       - HTTPSListener
     Properties:

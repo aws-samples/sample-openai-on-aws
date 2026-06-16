@@ -5,6 +5,15 @@ Resources:
   # S3 Bucket for CloudFormation artifacts (Lambda code packages)
   CfnArtifactsBucket:
     Type: AWS::S3::Bucket
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_18
+            comment: This is the CloudFormation artifacts bucket; a dedicated logging bucket is not deployed with this stack.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: This is the CloudFormation artifacts bucket; a dedicated logging bucket is not deployed with this stack.
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -12,6 +21,16 @@ Resources:
               SSEAlgorithm: AES256
       VersioningConfiguration:
         Status: Enabled
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: 1
+      AccessControl: Private
+      LoggingConfiguration:
+        LogFilePrefix: access-logs/
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOldVersions

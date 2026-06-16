@@ -44,6 +44,11 @@ Resources:
 
   PublicSubnet1:
     Type: AWS::EC2::Subnet
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W33
+            reason: Public subnets intentionally assign public IPs for internet-facing ECS tasks and ALB nodes.
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: !Select [0, !GetAZs '']
@@ -55,6 +60,11 @@ Resources:
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W33
+            reason: Public subnets intentionally assign public IPs for internet-facing ECS tasks and ALB nodes.
     Properties:
       VpcId: !Ref VPC
       AvailabilityZone: !Select [1, !GetAZs '']
@@ -74,6 +84,11 @@ Resources:
 
   DefaultPublicRoute:
     Type: AWS::EC2::Route
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W0
+            reason: Default public route to internet gateway is required for internet-facing subnets.
     DependsOn: InternetGatewayAttachment
     Properties:
       RouteTableId: !Ref PublicRouteTable
