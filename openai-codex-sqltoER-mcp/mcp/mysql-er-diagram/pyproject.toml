@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mysql-er-diagram-mcp"
+version = "0.1.0"
+description = "Local-only MCP server for generating Mermaid ER diagrams from MySQL INFORMATION_SCHEMA metadata."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "boto3>=1.35.0",
+  "mcp>=1.9.0",
+  "PyMySQL==1.1.1",
+]
+
+[project.scripts]
+mysql-er-diagram-mcp = "mysql_er_diagram_mcp.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mysql_er_diagram_mcp"]

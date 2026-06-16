@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "mysql-er-diagram": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "/absolute/path/to/capstone-project1/mcp/mysql-er-diagram",
+        "mysql-er-diagram-mcp"
+      ],
+      "env": {
+        "MYSQL_ER_HOST": "your-aurora-endpoint",
+        "MYSQL_ER_PORT": "3306",
+        "MYSQL_ER_DATABASE": "workshop",
+        "MYSQL_ER_READONLY_USERNAME": "readonly_user",
+        "MYSQL_ER_SECRET_FILE": "/absolute/path/to/readonly-secret.json"
+      }
+    }
+  }
+}
