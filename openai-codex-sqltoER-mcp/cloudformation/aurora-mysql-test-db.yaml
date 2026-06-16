@@ -37,10 +37,10 @@ Parameters:
 
   DesktopEgressPoolCidr:
     Type: String
-    Default: 15.248.7.0/24
     AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}0\/24$
     Description: Desktop external IPv4 egress pool allowed to connect to Aurora
-      MySQL. Use /24 for networks with multiple observed egress IPs.
+      MySQL. Required. Use your actual public /24 egress pool; a /24 may include
+      other tenants behind a shared NAT.
 
   DbInstanceClass:
     Type: String
@@ -395,6 +395,10 @@ Resources:
                   )
 
                   with connection.cursor() as cursor:
+                      # These DDL/DCL statements are built from constrained values:
+                      # the template validates usernames/database names and the generated
+                      # secret excludes characters that would weaken this escaping.
+                      # Keep those constraints in place if this block is modified later.
                       escaped_user = readonly_username.replace("'", "''")
                       escaped_password = readonly_password.replace("'", "''")
                       escaped_database = database_name.replace("`", "``")

@@ -4,7 +4,7 @@
       "command": "uvx",
       "args": [
         "--from",
-        "/absolute/path/to/capstone-project1/mcp/mysql-er-diagram",
+        "<PROJECT_ROOT>/mcp/mysql-er-diagram",
         "mysql-er-diagram-mcp"
       ],
       "env": {
@@ -12,7 +12,10 @@
         "MYSQL_ER_PORT": "3306",
         "MYSQL_ER_DATABASE": "workshop",
         "MYSQL_ER_READONLY_USERNAME": "readonly_user",
-        "MYSQL_ER_SECRET_FILE": "/absolute/path/to/readonly-secret.json"
+        "MYSQL_ER_SECRET_ARN": "arn:aws:secretsmanager:us-west-2:123456789012:secret:readonly-secret",
+        "AWS_PROFILE": "your-dev-profile",
+        "AWS_REGION": "us-west-2",
+        "MYSQL_ER_SSL_CA": "<PROJECT_ROOT>/mcp/mysql-er-diagram/us-west-2-bundle.pem"
       }
     }
   }

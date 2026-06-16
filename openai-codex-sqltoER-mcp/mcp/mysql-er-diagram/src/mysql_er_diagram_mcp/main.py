@@ -107,6 +107,18 @@ def _config(database: str | None = None) -> DbConfig:
         )
     if not password:
         raise RuntimeError("Read-only secret is missing a password value.")
+    ssl_ca = os.environ.get("MYSQL_ER_SSL_CA")
+    if not ssl_ca:
+        raise RuntimeError(
+            "MYSQL_ER_SSL_CA is required. Set it to an AWS RDS CA bundle path so "
+            "the MCP server verifies the Aurora/MySQL server certificate."
+        )
+    ssl_ca_path = Path(ssl_ca).expanduser()
+    if not ssl_ca_path.exists():
+        raise RuntimeError(
+            f"MYSQL_ER_SSL_CA does not exist: {ssl_ca}. Provide a valid AWS RDS "
+            "CA bundle path."
+        )
 
     db_name = database or os.environ.get("MYSQL_ER_DATABASE", "")
     return DbConfig(
@@ -115,7 +127,7 @@ def _config(database: str | None = None) -> DbConfig:
         database=_require_identifier(db_name, "database"),
         username=username,
         password=password,
-        ssl_ca=os.environ.get("MYSQL_ER_SSL_CA"),
+        ssl_ca=str(ssl_ca_path),
     )
 
 
@@ -132,11 +144,10 @@ def _connect(config: DbConfig):
         "write_timeout": 15,
         "connect_timeout": 10,
         "autocommit": True,
+        "ssl_ca": config.ssl_ca,
+        "ssl_verify_cert": True,
+        "ssl_verify_identity": True,
     }
-    if config.ssl_ca:
-        connect_args["ssl_ca"] = config.ssl_ca
-        connect_args["ssl_verify_cert"] = True
-        connect_args["ssl_verify_identity"] = True
     return pymysql.connect(**connect_args)
 
 

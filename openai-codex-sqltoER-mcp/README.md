@@ -20,6 +20,14 @@ The CloudFormation stack in this repo is mainly for testing, demo setup, or for
 cases where you want a disposable Aurora environment to validate the MCP and ER
 diagram flow end to end.
 
+Important:
+
+- if you already have a dev/test database, you usually do not need the CloudFormation stack
+- if you do use the CloudFormation stack, you must explicitly provide your own
+  desktop public `/24` egress CIDR at deploy time
+- the local MCP server requires `MYSQL_ER_SSL_CA` and refuses unverified TLS
+  connections
+
 ## Why This Project Exists
 
 Backend and database developers often need a fast answer to questions like:
@@ -188,6 +196,9 @@ Refresh the CIDR before deployment if your ISP egress changes:
 export DESKTOP_EGRESS_POOL_CIDR="$(curl -fsS https://checkip.amazonaws.com | awk -F. '{print $1 "." $2 "." $3 ".0/24"}')"
 ```
 
+For safety, the CloudFormation template does not include a real default for
+`DesktopEgressPoolCidr`. You must provide an explicit value at deployment time.
+
 ## Observability
 
 The custom resource Lambda logs create, update, and delete requests, database
@@ -208,7 +219,10 @@ mcp/mysql-er-diagram
 
 Safeguards:
 
-- uses only the configured read-only username, defaulting to `readonly_user`
+- is intended to run with a database user that has read-only grants, typically
+  `readonly_user`
+- the actual read-only guarantee comes from the database grants on that user,
+  not from the MCP process itself
 - intended grant is `SELECT, SHOW VIEW` on the initial database only
 - queries only:
   - `INFORMATION_SCHEMA.TABLES`
@@ -232,6 +246,10 @@ In practice, this means a developer can ask Codex for a current schema summary
 or a refreshed ER diagram and get an answer based on live metadata from the
 database they are actively building against.
 
+Do not point this MCP server at an admin or write-capable database secret. Use
+the scoped database user created for schema visibility, and rely on the DB
+grants to enforce read-only access.
+
 ## Codex App MCP Configuration
 
 The Codex desktop app MCP entry should use `uvx`:
@@ -241,7 +259,7 @@ The Codex desktop app MCP entry should use `uvx`:
 command = "uvx"
 args = [
     "--from",
-    "/absolute/path/to/project/mcp/mysql-er-diagram",
+    "<PROJECT_ROOT>/mcp/mysql-er-diagram",
     "mysql-er-diagram-mcp",
 ]
 
@@ -253,11 +271,22 @@ MYSQL_ER_PORT = "3306"
 MYSQL_ER_DATABASE = "workshop"
 MYSQL_ER_READONLY_USERNAME = "readonly_user"
 MYSQL_ER_SECRET_ARN = "arn:aws:secretsmanager:us-west-2:123456789012:secret:readonly-secret"
-MYSQL_ER_SSL_CA = "/absolute/path/to/project/mcp/mysql-er-diagram/us-west-2-bundle.pem"
+MYSQL_ER_SSL_CA = "<PROJECT_ROOT>/mcp/mysql-er-diagram/us-west-2-bundle.pem"
 ```
 
 After updating `~/.codex/config.toml`, restart Codex or reload its MCP/config
 state.
+
+Replace `<PROJECT_ROOT>` with the local filesystem path where you cloned this
+project.
+
+`MYSQL_ER_SSL_CA` is required. The MCP server fails closed if the CA bundle is
+missing so Aurora/MySQL connections always use certificate and hostname
+verification.
+
+If you choose to use a local secret file instead of Secrets Manager, keep it
+outside version control. The repo `.gitignore` excludes common secret-file
+patterns, but the safer default is to use `MYSQL_ER_SECRET_ARN`.
 
 ## What The `us-west-2-bundle.pem` File Is For
 
@@ -281,8 +310,10 @@ to disable certificate checks, which is not what we want.
 
 - Aurora requires encrypted client connections with
   `require_secure_transport=ON`
-- the read-only user is meant only for local schema inspection and ER diagram
-  generation
+- the intended database user is meant only for local schema inspection and ER
+  diagram generation
+- the effective read-only boundary is the database `GRANT`, not a special MCP
+  enforcement layer
 - default grant scope is the initial database, not all databases
 - no hardcoded database credentials are committed in the repo
 
