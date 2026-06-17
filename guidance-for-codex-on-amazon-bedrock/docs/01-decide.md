@@ -36,7 +36,8 @@ Run this path if **all** of the following are true:
 - [ ] You can distribute AWS CLI v2 to developers (winget / MSI / Homebrew /
       MDM).
 - [ ] Amazon Bedrock is activated in at least one region you plan to use
-      (see [reference-regions.md](reference-regions.md) for the model × region matrix).
+      (see [reference-regions.md](reference-regions.md) for how to verify model
+      availability against AWS docs and your account).
 - [ ] Per-user *attribution* in CloudTrail/CUR is sufficient — you do **not**
       require hard per-user token or cost cutoffs.
 

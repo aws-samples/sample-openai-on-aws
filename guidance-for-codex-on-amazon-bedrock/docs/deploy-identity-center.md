@@ -11,7 +11,7 @@ resulting profile through the standard AWS SDK credential chain.
   Okta, Ping, JumpCloud, Google Workspace, CyberArk, OneLogin.
 - Admin access in both the AWS management account and the corporate IdP.
 - AWS CLI v2 distributable to end users via winget / MSI / Homebrew / MDM.
-- Bedrock activated in the target region(s). See [reference-regions.md](reference-regions.md) for the current model × region matrix.
+- Bedrock activated in the target region(s). See [reference-regions.md](reference-regions.md) for how to verify current model availability in AWS.
 
 ## Admin setup (one-time)
 

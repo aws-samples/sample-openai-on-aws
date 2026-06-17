@@ -61,7 +61,8 @@ Parameters:
 
   AwsRegion:
     Type: String
-    Default: us-east-1
+    Default: us-east-2
+    Description: Amazon Bedrock region for upstream model calls. Use us-east-2 for GPT-5.4 / GPT-5.5 via Mantle unless you intentionally override the gateway model config.
 
   LiteLLMImage:
     Type: String

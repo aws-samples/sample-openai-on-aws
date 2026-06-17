@@ -24,9 +24,9 @@ LiteLLM Gateway → Bedrock
 
 The canonical end-to-end deployment is in
 [QUICKSTART_LLM_GATEWAY.md](QUICKSTART_LLM_GATEWAY.md). The OIDC-specific
-steps below extract the JWT middleware path. Set `AWS_REGION` and the ECR
-registry variables (`ECR_REGISTRY`, `LITELLM_IMAGE`, `JWT_IMAGE`) once at the
-top of your shell session as shown in that guide.
+steps below extract the JWT middleware path. Set `AWS_REGION`, `BEDROCK_REGION`,
+and the ECR registry variables (`ECR_REGISTRY`, `LITELLM_IMAGE`, `JWT_IMAGE`)
+once at the top of your shell session as shown in that guide.
 
 **Step 1: Gather your IdP details**
 
@@ -95,7 +95,7 @@ aws cloudformation deploy \
       LiteLLMMasterKey="$LITELLM_MASTER_KEY" \
       DBUsername=litellm \
       DBPassword="$DB_PASSWORD" \
-      AwsRegion="$AWS_REGION" \
+      AwsRegion="$BEDROCK_REGION" \
       LiteLLMImage="$LITELLM_IMAGE" \
       AlbCertificateArn="$ALB_CERTIFICATE_ARN" \
       AlbDomainName="$GATEWAY_DOMAIN_NAME" \

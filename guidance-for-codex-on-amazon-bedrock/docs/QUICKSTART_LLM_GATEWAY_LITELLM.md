@@ -36,6 +36,7 @@ git clone https://github.com/aws-samples/sample-openai-on-aws.git
 cd sample-openai-on-aws/guidance-for-codex-on-amazon-bedrock
 
 export AWS_REGION=us-west-2
+export BEDROCK_REGION=us-east-2
 export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export ECR_REGISTRY="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
 ```
@@ -137,9 +138,10 @@ export MASTER_KEY=$(openssl rand -hex 32)
 export DB_PASSWORD=$(openssl rand -base64 32)
 
 # Generate a short-term Bedrock Mantle API key scoped to us-east-2 (valid 12h)
-# Both gpt-5.4 and gpt-5.5 use us-east-2 endpoints — key must match
+# Keep BEDROCK_REGION separate from the CloudFormation deployment region.
+# Both gpt-5.4 and gpt-5.5 use us-east-2 endpoints by default — key must match.
 pip install aws-bedrock-token-generator -q
-export BEDROCK_MANTLE_KEY=$(AWS_DEFAULT_REGION=us-east-2 python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())")
+export BEDROCK_MANTLE_KEY=$(AWS_DEFAULT_REGION="$BEDROCK_REGION" AWS_REGION="$BEDROCK_REGION" python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())")
 
 # Deploy gateway (references networking stack via imports)
 aws cloudformation deploy \
@@ -155,7 +157,7 @@ aws cloudformation deploy \
       BedrockMantleApiKey="$BEDROCK_MANTLE_KEY" \
       DBUsername=litellm \
       DBPassword="$DB_PASSWORD" \
-      AwsRegion="$AWS_REGION" \
+      AwsRegion="$BEDROCK_REGION" \
       LiteLLMImage="$LITELLM_IMAGE" \
       AlbCertificateArn="$ALB_CERTIFICATE_ARN" \
       AlbDomainName="$GATEWAY_DOMAIN_NAME" \

@@ -23,8 +23,9 @@ regardless of how you deployed.
   `litellm_config.yaml`) is not available in the target region, or it is
   only served through the mantle endpoint (GPT-5.4 / GPT-5.5) and you are calling
   standard Converse, or vice versa.
-- **Fix:** verify the model ID against the region matrix in
-  [reference-regions.md](reference-regions.md). `openai.gpt-oss-120b-1:0`
+- **Fix:** verify the model ID against current AWS Bedrock docs and confirm it
+  appears in `aws bedrock list-foundation-models --region <region>` as
+  described in [reference-regions.md](reference-regions.md). `openai.gpt-oss-120b-1:0`
   and similar models use standard Converse; `gpt-5.4` / `gpt-5.5` use the mantle
   endpoint.
 

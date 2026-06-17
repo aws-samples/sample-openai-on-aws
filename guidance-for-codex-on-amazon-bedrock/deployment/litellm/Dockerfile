@@ -7,11 +7,18 @@ RUN pip install --no-cache-dir \
     opentelemetry-sdk \
     opentelemetry-exporter-otlp-proto-http
 
-RUN useradd --create-home --uid 10001 --shell /bin/false appuser \
-    && mkdir -p /app \
-    && chown -R appuser:appuser /app
+RUN set -eux; \
+    if command -v useradd >/dev/null 2>&1; then \
+      useradd --create-home --uid 10001 --shell /bin/false appuser; \
+    elif adduser --help 2>&1 | grep -q BusyBox; then \
+      adduser -S -D -H -u 10001 -h /home/appuser -s /bin/false appuser; \
+    else \
+      adduser --system --uid 10001 --home /home/appuser --shell /bin/false --disabled-login --gecos '' appuser; \
+    fi; \
+    mkdir -p /app; \
+    chown -R 10001:10001 /app
 
-COPY --chown=appuser:appuser litellm_config.yaml /app/config.yaml
+COPY --chown=10001:10001 litellm_config.yaml /app/config.yaml
 
 USER appuser
 
