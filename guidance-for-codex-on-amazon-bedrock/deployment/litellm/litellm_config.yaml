@@ -1,20 +1,17 @@
 model_list:
-  # OpenAI GPT-5.x models via Amazon Bedrock Mantle
-  # Auth: set BEDROCK_MANTLE_API_KEY to a short-term Bedrock API key (valid 12h)
-  # Generate: pip install aws-bedrock-token-generator && python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())"
-  # Note: GPT-5.x traffic to Bedrock Mantle uses /v1/responses. Codex custom providers default to Responses, and the docs keep wire_api="responses" explicit for clarity. LiteLLM proxies the request as-is.
+  # OpenAI GPT-5.x models via LiteLLM's Bedrock Mantle provider.
+  # The bundled entrypoint refreshes AWS_BEARER_TOKEN_BEDROCK in-process from
+  # the AWS credential chain using aws-bedrock-token-generator, so do not pin
+  # api_key here. LiteLLM reads the bearer token from env on each request.
+  # GPT-5.x traffic to Mantle uses /openai/v1/responses.
 
   - model_name: gpt-5.4
     litellm_params:
-      model: openai/openai.gpt-5.4
-      api_key: os.environ/BEDROCK_MANTLE_API_KEY
-      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
+      model: bedrock_mantle/openai.gpt-5.4
 
   - model_name: gpt-5.5
     litellm_params:
-      model: openai/openai.gpt-5.5
-      api_key: os.environ/BEDROCK_MANTLE_API_KEY
-      api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
+      model: bedrock_mantle/openai.gpt-5.5
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
@@ -33,5 +30,5 @@ general_settings:
 
 litellm_settings:
   set_verbose: false
-  drop_params: true    # silently drop unsupported OpenAI params
+  drop_params: false   # fail fast if the gateway cannot preserve a Responses API field
   # callbacks: ["otel"]  # uncomment + set OTEL_ENDPOINT env var if you wire up an OTel collector

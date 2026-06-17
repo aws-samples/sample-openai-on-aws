@@ -1,2 +1,5 @@
 specs/
 deployment/binaries/
+
+# Local gateway credentials (master key + DB password) — never commit
+deployment/litellm/.env.gateway

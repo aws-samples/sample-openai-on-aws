@@ -18,15 +18,20 @@ already the default for Codex custom providers.
 
 ## Endpoints
 
-- **Mantle (OpenAI-compatible API):** `bedrock-mantle.<region>.api.aws/openai/v1` — serves GPT-5.4, GPT-5.5, and GPT-OSS models. The LiteLLM Gateway uses the `openai/<model>` model string and proxies Codex Responses API traffic straight to Bedrock Mantle.
+- **Mantle (OpenAI-compatible API):** `bedrock-mantle.<region>.api.aws/openai/v1` — serves GPT-5.4, GPT-5.5, and GPT-OSS models. The LiteLLM Gateway uses LiteLLM's `bedrock_mantle/<model>` provider and keeps Codex traffic on the OpenAI-compatible Responses path.
 
-> **Note:** The sample LiteLLM gateway config in this repo uses `us-east-2`
-> for both GPT-5.4 and GPT-5.5 because the Bedrock API key must be scoped to a
-> single region. Treat that as a sample default, not a statement of global
-> availability. Override `api_base` and regenerate the key with
-> `AWS_DEFAULT_REGION=<region>` if your chosen Bedrock region differs.
+> **Note:** The LiteLLM gateway sample in this repo now resolves the Mantle
+> endpoint from the gateway's selected Bedrock region. The tested walkthrough
+> uses `us-east-1`, but the same image can target a different region as long as
+> the gateway mints the bearer token and calls the Mantle endpoint in that same
+> region.
 
-Authenticates with a Bedrock API key as a Bearer token (`Authorization: Bearer <key>`). Generate a short-term key (12h) from your IAM credentials:
+Under the hood, Mantle authenticates with a Bearer token
+(`Authorization: Bearer <key>`). The LiteLLM gateway sample in this repo now
+refreshes `AWS_BEARER_TOKEN_BEDROCK` automatically from the gateway's AWS
+credentials using the official `aws-bedrock-token-generator` package. For
+direct manual API testing, you can still generate a short-term key (12h) from
+your IAM credentials:
 ```bash
 pip install aws-bedrock-token-generator
 python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())"
