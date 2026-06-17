@@ -246,7 +246,10 @@ region = us-west-2
 
 ### Codex Configuration (`~/.codex/config.toml`)
 
-Append the following block to `~/.codex/config.toml`. The Bedrock provider uses the AWS SDK credential chain, so the `profile` value must match the `[profile ...]` name in `~/.aws/config`.
+Append the following block to the user-level `~/.codex/config.toml`. Codex
+ignores provider settings in project-local `.codex/config.toml` files. The
+Bedrock provider uses the AWS SDK credential chain, so the `profile` value
+must match the `[profile ...]` name in `~/.aws/config`.
 
 ```toml
 model_provider = "amazon-bedrock"
@@ -256,6 +259,11 @@ model = "openai.gpt-5.4"
 region = "us-west-2"
 profile = "codex-bedrock"
 ```
+
+This guide keeps `openai.gpt-5.4` in the sample because the walkthrough uses
+`us-west-2`. OpenAI recommends the latest GPT-5 family model for Codex, so if
+you deploy in `us-east-2`, switch the snippet to `model = "openai.gpt-5.5"`
+and update the Bedrock region to match.
 
 For advanced Codex configuration options (model parameters, sandbox modes, custom providers), see the [OpenAI Codex configuration reference](https://developers.openai.com/codex/config-advanced).
 

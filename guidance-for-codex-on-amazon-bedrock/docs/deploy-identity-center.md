@@ -117,7 +117,7 @@ sso_role_name = CodexBedrockUser
 region = us-west-2
 ```
 
-**Codex configuration** — append to `~/.codex/config.toml`:
+**Codex configuration** — append to the user-level `~/.codex/config.toml`:
 
 ```toml
 model_provider = "amazon-bedrock"
@@ -130,6 +130,12 @@ name = "Amazon Bedrock"
 region = "us-west-2"
 profile = "codex"
 ```
+
+Keep provider settings in user-level `~/.codex/config.toml`; Codex ignores
+`model_provider` and `model_providers` in project-local `.codex/config.toml`
+files. This sample keeps `openai.gpt-5.4` so the `us-west-2` walkthrough works
+end to end. If you standardize on `us-east-2`, prefer `openai.gpt-5.5` to
+follow OpenAI's latest-model guidance for Codex.
 
 For advanced Codex configuration (model parameters, sandbox modes, custom
 providers), see the

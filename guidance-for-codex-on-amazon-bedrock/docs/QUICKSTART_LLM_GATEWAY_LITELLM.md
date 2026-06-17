@@ -191,7 +191,7 @@ curl -X POST "$GATEWAY_URL/key/generate" \
   -d '{
     "key_alias": "alice@company.com",
     "user_id": "alice@company.com",
-    "models": ["gpt-4o", "gpt-4o-mini", "gpt-oss-120b"],
+    "models": ["gpt-5.5", "gpt-5.4", "gpt-oss-120b"],
     "max_budget": 50.0,
     "budget_duration": "30d",
     "tpm_limit": 100000,
@@ -207,21 +207,21 @@ If you deployed with `EnableJwtMiddleware=true`, see [deployment/litellm/jwt-mid
 
 ### Codex Configuration
 
-Developers add this to `~/.codex/config.toml`:
+Developers add this to the user-level `~/.codex/config.toml`:
 
 ```toml
 model_provider = "litellm-gateway"
-model = "gpt-5.5"
-web_search = "disabled"   # Bedrock Mantle does not support the web_search tool type
+model = "gpt-5.5"         # Preferred latest GPT-5 model when available
+web_search = "disabled"   # Bedrock Mantle does not accept the hosted web_search tool type
 
 [model_providers.litellm-gateway]
 name = "LiteLLM Gateway"
 base_url = "http://<gateway-url>/v1"
 env_key = "OPENAI_API_KEY"
-wire_api = "responses"    # Codex 0.136+ calls /v1/responses directly; must match
+wire_api = "responses"    # Optional but explicit; custom providers default to Responses
 ```
 
-> **Note:** `wire_api = "responses"` is required for GPT-5.x because these models only support the Responses API. `web_search = "disabled"` prevents Codex from sending a tool type that Bedrock Mantle does not accept. Both settings are required for requests to succeed.
+> **Note:** Bedrock Mantle serves GPT-5.x through the Responses API, so `wire_api = "responses"` is the right setting here. Codex custom providers already default to Responses; this guide keeps the setting explicit because it makes the Mantle dependency obvious. `web_search = "disabled"` is a Bedrock Mantle compatibility choice, not a general OpenAI recommendation. Keep this provider block in user-level `~/.codex/config.toml`; Codex ignores provider and auth settings in project-local `.codex/config.toml`.
 
 Set API key:
 
@@ -356,10 +356,10 @@ aws iam list-attached-role-policies --role-name "$TASK_ROLE"
 echo $OPENAI_API_KEY
 
 # Test key directly
-curl -X POST "$GATEWAY_URL/v1/chat/completions" \
+curl -X POST "$GATEWAY_URL/v1/responses" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-5.4","messages":[{"role":"user","content":"test"}]}'
+  -d '{"model":"gpt-5.5","input":"test"}'
 ```
 
 ### Docker build fails
@@ -445,7 +445,7 @@ model_list:
       api_base: "https://bedrock-mantle.us-east-2.api.aws/openai/v1"
 ```
 
-> **Note on GPT-5.4 / GPT-5.5:** These models only support the Responses API. The `openai/` prefix tells LiteLLM to proxy the request to the OpenAI-compatible Bedrock Mantle endpoint as-is — no additional routing needed because Codex (v0.136+) already calls `/v1/responses` directly via `wire_api = "responses"`. Both endpoints use `us-east-2` so a single `BEDROCK_MANTLE_API_KEY` (generated with `AWS_DEFAULT_REGION=us-east-2`) covers both models. GPT-5.4 is also available in `us-west-2` — see `reference-regions.md` if you prefer a different region.
+> **Note on GPT-5.4 / GPT-5.5:** These models are Responses-only on Bedrock Mantle. The `openai/` prefix tells LiteLLM to proxy the request straight to the OpenAI-compatible Mantle endpoint. This guide sets `wire_api = "responses"` explicitly in Codex for readability, but Codex custom providers already default to Responses. Prefer `gpt-5.5` when you want the latest OpenAI-recommended Codex model; keep `gpt-5.4` when you need broader Bedrock regional coverage. Both endpoints use `us-east-2` so a single `BEDROCK_MANTLE_API_KEY` (generated with `AWS_DEFAULT_REGION=us-east-2`) covers both models. GPT-5.4 is also available in `us-west-2` — see `reference-regions.md` if you prefer a different region.
 
 Rebuild and redeploy the image (Steps 2 & 6).
 

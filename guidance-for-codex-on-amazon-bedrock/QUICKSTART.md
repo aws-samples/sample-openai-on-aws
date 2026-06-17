@@ -1,6 +1,6 @@
 # Guidance for Codex on Amazon Bedrock
 
-Run [OpenAI Codex](https://github.com/openai/codex) against [Amazon Bedrock](https://aws.amazon.com/bedrock/) with enterprise-grade identity, optional quota enforcement, and optional observability.
+Run [OpenAI Codex](https://developers.openai.com/codex/overview) against [Amazon Bedrock](https://aws.amazon.com/bedrock/) with enterprise-grade identity, optional quota enforcement, and optional observability.
 
 This guidance provides two deployment patterns — choose the one that matches your organization's needs for budget enforcement.
 
@@ -192,8 +192,12 @@ When you deploy the LiteLLM reference stacks:
 
 | Model ID | Notes |
 |----------|-------|
-| `openai.gpt-5.5` | Latest model. `us-east-2` only. |
-| `openai.gpt-5.4` | **Recommended default.** `us-east-2`, `us-west-2`. |
+| `openai.gpt-5.5` | Preferred default where available. Latest GPT-5 model recommended by OpenAI for Codex. `us-east-2` only. |
+| `openai.gpt-5.4` | Fallback when you need broader Bedrock regional coverage. `us-east-2`, `us-west-2`. |
+
+OpenAI recommends the latest GPT-5 family model for Codex. In this repo,
+prefer `openai.gpt-5.5` when your Bedrock region supports it, and use
+`openai.gpt-5.4` when you need the wider regional coverage in the full matrix.
 
 **Regions:** GPT-5.5: `us-east-2` only. GPT-5.4: `us-east-2`, `us-west-2`.
 
@@ -376,9 +380,10 @@ This guidance is licensed under [MIT No Attribution](LICENSE).
 
 ## Related Resources
 
-- **[OpenAI Codex (GitHub)](https://github.com/openai/codex)** — Codex source and release notes
+- **[OpenAI Codex Overview](https://developers.openai.com/codex/overview)** — Product docs and setup guidance
 - **[OpenAI Codex CLI](https://developers.openai.com/codex/cli)** — Install, authenticate, and run Codex
 - **[OpenAI Codex Advanced Configuration](https://developers.openai.com/codex/config-advanced)** — Custom providers, profiles, sandbox, OpenTelemetry
+- **[OpenAI Codex (GitHub)](https://github.com/openai/codex)** — Source and release notes
 - **[Amazon Bedrock](https://aws.amazon.com/bedrock/)** — AWS managed AI service
 - **[LiteLLM](https://www.litellm.ai/)** — Reference LLM gateway used in this guidance
 - **[AWS IAM Identity Center](https://aws.amazon.com/iam/identity-center/)** — AWS SSO service

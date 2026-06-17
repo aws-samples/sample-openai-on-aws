@@ -58,7 +58,7 @@ Any OpenAI-compatible gateway that integrates with Amazon Bedrock can be used wi
 Any gateway must meet these minimum requirements:
 
 ### Technical Requirements
-- ✅ **OpenAI API compatibility** — implements `/v1/chat/completions` endpoint
+- ✅ **OpenAI API compatibility** — implements `/v1/responses` for Codex and GPT-5.x workloads (optionally `/v1/chat/completions` for chat-style aliases)
 - ✅ **Bedrock integration** — can call Amazon Bedrock APIs (requires IAM role)
 - ✅ **Authentication** — supports API keys or JWT/OIDC tokens
 - ✅ **AWS deployment** — runs on ECS, EKS, EC2, Lambda, or hybrid
@@ -106,19 +106,27 @@ See the gateway-specific guide for exact steps.
 
 ### Phase 3: Developer Configuration (Common)
 
-Once deployed, developers configure Codex to use the gateway. Your admin provides the gateway URL (for LiteLLM, it's the `GatewayEndpoint` output from the gateway stack):
+Once deployed, developers configure the user-level `~/.codex/config.toml` to
+use the gateway. Your admin provides the gateway URL (for LiteLLM, it's the
+`GatewayEndpoint` output from the gateway stack):
 
 ```toml
 # ~/.codex/config.toml
 model_provider = "my-gateway"
-model = "gpt-4o"  # maps to GPT-OSS Safeguard 120b via Bedrock Mantle
+model = "gpt-5.5"  # Prefer the latest GPT-5 family model your gateway exposes
 
 [model_providers.my-gateway]
 name = "My LLM Gateway"
 base_url = "http://<gateway-url>/v1"  # Replace with URL from admin
 env_key = "OPENAI_API_KEY"
-wire_api = "chat"
+wire_api = "responses"  # Optional but explicit; custom providers default to Responses
 ```
+
+Keep gateway provider settings in user-level `~/.codex/config.toml`; Codex
+ignores `model_provider` and `model_providers` in project-local
+`.codex/config.toml` files. If your gateway exposes different aliases (for
+example GPT-OSS through `gpt-4o`-style names), swap the `model` string
+accordingly.
 
 ```bash
 # Set API key (get from gateway admin)

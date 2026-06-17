@@ -159,12 +159,12 @@ curl https://<gateway-url>/api/my-key \
 
 export JWT_TOKEN="eyJhbGc..."  # gitleaks:allow  # nosemgrep: generic.secrets.gitleaks.generic-api-key
 
-curl https://<gateway-url>/v1/chat/completions \
+curl https://<gateway-url>/v1/responses \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o",
-    "messages": [{"role": "user", "content": "Hello!"}]
+    "model": "gpt-5.5",
+    "input": "Hello!"
   }'
 
 # Middleware automatically:
