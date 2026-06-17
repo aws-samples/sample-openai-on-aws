@@ -120,6 +120,14 @@ func TestRun_ClearCache(t *testing.T) {
 	setupConfig(t, tmp, basicConfig)
 	future := time.Now().Add(1 * time.Hour).UTC().Format(time.RFC3339)
 	writeCreds(t, tmp, "default", future)
+	if err := storage.SaveMonitoringToken("default", "session", "monitoring-token", map[string]interface{}{
+		"exp": float64(time.Now().Add(1 * time.Hour).Unix()),
+	}); err != nil {
+		t.Fatalf("save monitoring token: %v", err)
+	}
+	if err := storage.SaveRefreshToken("default", "session", "refresh-token"); err != nil {
+		t.Fatalf("save refresh token: %v", err)
+	}
 
 	os.Args = []string{"credential-process", "--profile", "default", "--clear-cache"}
 	if code := run(); code != 0 {
@@ -132,6 +140,17 @@ func TestRun_ClearCache(t *testing.T) {
 	}
 	if !storage.IsExpiredDummy(creds) {
 		t.Errorf("expected EXPIRED placeholder, got %+v", creds)
+	}
+
+	token, err := storage.GetMonitoringToken("default", "session")
+	if err != nil {
+		t.Fatalf("monitoring token after clear: %v", err)
+	}
+	if token != "" {
+		t.Errorf("expected cleared monitoring token, got %q", token)
+	}
+	if got := storage.LoadRefreshToken("default", "session"); got != "" {
+		t.Errorf("expected cleared refresh token, got %q", got)
 	}
 }
 
