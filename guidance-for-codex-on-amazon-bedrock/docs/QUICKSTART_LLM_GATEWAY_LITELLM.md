@@ -153,9 +153,12 @@ aws cloudformation deploy \
       EnableOtel="true" \
       LiteLLMMasterKey="$MASTER_KEY" \
       BedrockMantleApiKey="$BEDROCK_MANTLE_KEY" \
+      DBUsername=litellm \
       DBPassword="$DB_PASSWORD" \
       AwsRegion="$AWS_REGION" \
       LiteLLMImage="$LITELLM_IMAGE" \
+      AlbCertificateArn="$ALB_CERTIFICATE_ARN" \
+      AlbDomainName="$GATEWAY_DOMAIN_NAME" \
       AllowedCidr="10.0.0.0/8" \
       EnableJwtMiddleware="false"
 

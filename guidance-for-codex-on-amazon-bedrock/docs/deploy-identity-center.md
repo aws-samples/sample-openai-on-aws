@@ -237,7 +237,10 @@ CloudWatch `user.id` dimension.
 ### 1. Deploy the collector stack
 
 ```bash
-deployment/scripts/deploy-otel-stack.sh --region us-west-2
+deployment/scripts/deploy-otel-stack.sh \
+  --region us-west-2 \
+  --custom-domain otel.codex.example.com \
+  --hosted-zone-id Z0123456789ABCDEFGHIJ
 ```
 
 The script deploys three stacks in order (`codex-otel-networking`,
@@ -250,14 +253,16 @@ Useful flags:
 |---|---|
 | `--region` | Target region (default `us-west-2`). |
 | `--stack-prefix` | Rename the three stacks (default `codex-otel`). |
+| `--custom-domain` | Required HTTPS endpoint domain for the collector. |
+| `--hosted-zone-id` | Required Route 53 zone ID for certificate DNS validation. |
 | `--dashboard-name` | CloudWatch dashboard name (default `CodexOnBedrock`). |
 | `--input-price` / `--output-price` / `--cached-input-price` | Per-1M-token USD for the dashboard's spend-estimate widgets. Defaults are placeholders — update after GPT-5.4 pricing publishes. |
 
-### 2. Harden the collector (opt-in — recommended before production use)
+### 2. Add JWT validation (optional production hardening)
 
-The default posture is HTTP-only: the collector accepts any `x-user-id` value
-(trust-on-distribution). For production, pass all five flags below together
-to enable HTTPS and ALB JWT validation:
+The collector is HTTPS-only. Without JWT validation it still accepts any
+`x-user-id` value (trust-on-distribution). For stronger attribution, pass the
+OIDC flags below to enable ALB JWT validation:
 
 ```bash
 deployment/scripts/deploy-otel-stack.sh \
@@ -274,7 +279,7 @@ include it as an additional static header alongside `x-user-id` in the
 `[otel.headers]` block shown below. Per-user token distribution is out of
 scope for this document.
 
-**Trade-offs:** HTTP-only (trust-on-distribution) is faster to deploy but accepts any `x-user-id` value. JWT validation (HTTPS + ALB auth) verifies tokens but requires ACM certificate and OIDC issuer configuration.
+**Trade-offs:** HTTPS without JWT is simpler but accepts any `x-user-id` value. JWT validation verifies tokens but requires OIDC issuer configuration and developer token distribution.
 
 ### 3. Add the OTel block to the developer config
 

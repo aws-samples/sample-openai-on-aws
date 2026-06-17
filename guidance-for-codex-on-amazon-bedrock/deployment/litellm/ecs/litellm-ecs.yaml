@@ -18,7 +18,7 @@ Parameters:
     AllowedValues: ["true", "false"]
     Description: >
       When false (default), the gateway runs without OTel env vars and does NOT import
-      ${OtelStackName}-endpoint, so the OTel collector stack does not need to exist.
+      the OTel collector endpoint export, so the OTel collector stack does not need to exist.
       Set to true only if you've separately deployed an OTel collector and want the
       gateway to forward traces to it.
 
@@ -39,6 +39,25 @@ Parameters:
     Type: String
     NoEcho: true
     Description: Password for the RDS PostgreSQL instance
+
+  DBUsername:
+    Type: String
+    NoEcho: true
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9_]*"
+    ConstraintDescription: Must begin with a letter and contain only letters, numbers, and underscores.
+    Description: Username for the RDS PostgreSQL instance
+
+  DBEngineVersion:
+    Type: String
+    Default: "17"
+    AllowedValues: ["17"]
+    Description: PostgreSQL major version for the RDS instance
+
+  RDSMonitoringInterval:
+    Type: Number
+    Default: 60
+    AllowedValues: [1, 5, 10, 15, 30, 60]
+    Description: Enhanced monitoring interval in seconds for the RDS instance.
 
   AwsRegion:
     Type: String
@@ -66,6 +85,17 @@ Parameters:
       For enterprise deployments, use your corporate network CIDR or VPN range.
       Do NOT use 0.0.0.0/0 - AWS security scans will auto-delete the listener.
       For public access, deploy AWS WAF with rate limiting and IP reputation filtering.
+
+  AlbCertificateArn:
+    Type: String
+    AllowedPattern: ".+"
+    ConstraintDescription: ACM certificate ARN is required for HTTPS.
+    Description: ACM certificate ARN. The ALB listener uses HTTPS on port 443.
+
+  AlbDomainName:
+    Type: String
+    Default: ""
+    Description: Optional DNS name that resolves to the ALB and matches AlbCertificateArn. Used in the GatewayEndpoint output.
 
   # JWT Middleware Parameters (optional - for OIDC authentication)
   EnableJwtMiddleware:
@@ -114,18 +144,116 @@ Parameters:
 Conditions:
   UseJwtMiddleware: !Equals [!Ref EnableJwtMiddleware, "true"]
   OtelEnabled: !Equals [!Ref EnableOtel, "true"]
+  HasAlbDomainName: !Not [!Equals [!Ref AlbDomainName, ""]]
 
 Resources:
+
+  LiteLLMKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "${AWS::StackName} LiteLLM logs and secrets key"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableIAMPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+          - Sid: AllowCloudWatchLogs
+            Effect: Allow
+            Principal:
+              Service: !Sub "logs.${AWS::Region}.${AWS::URLSuffix}"
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: "*"
+            Condition:
+              ArnLike:
+                kms:EncryptionContext:aws:logs:arn: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*"
+
+  LiteLLMKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${AWS::StackName}-litellm"
+      TargetKeyId: !Ref LiteLLMKmsKey
 
   # --- Secrets ---
 
   LiteLLMSecret:
     Type: AWS::SecretsManager::Secret
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_108
+            comment: Secret contains externally-supplied API keys and DB password provided as stack parameters; automated rotation requires application-specific Lambda not deployed here.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W77
+            reason: Secret contains externally-supplied API keys and DB password provided as stack parameters; automated rotation requires application-specific Lambda not deployed here.
+      guard:
+        SuppressedRules:
+          - SECRETSMANAGER_ROTATION_ENABLED_CHECK: "Secret contains externally-supplied API keys and DB password; automated rotation requires application-specific Lambda not deployed here."
     Properties:
       Name: !Sub "${AWS::StackName}/litellm-secrets"
+      KmsKeyId: !Ref LiteLLMKmsKey
       SecretString: !Sub '{"LITELLM_MASTER_KEY":"${LiteLLMMasterKey}","BEDROCK_MANTLE_API_KEY":"${BedrockMantleApiKey}"}'
 
   # --- IAM ---
+
+  TaskExecutionSecretsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} ECS task execution secrets access"
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Resource: !Ref LiteLLMSecret
+
+  TaskBedrockAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} ECS task Bedrock access"
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+              - bedrock:InvokeModelWithResponseStream
+            Resource: !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+          - Effect: Allow
+            Action:
+              - bedrock:CallWithBearerToken
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AwsRegion
+
+  TaskDynamoDBAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: UseJwtMiddleware
+    Properties:
+      Description: !Sub "${AWS::StackName} ECS task DynamoDB access for JWT middleware"
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:Query
+              - dynamodb:Scan
+            Resource: !Sub
+              - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}"
+              - TableName: !ImportValue
+                  Fn::Sub: "${UserKeyMappingStackName}-TableName"
 
   TaskExecutionRole:
     Type: AWS::IAM::Role
@@ -139,15 +267,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-      Policies:
-        - PolicyName: SecretsAccess
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                  - secretsmanager:DescribeSecret
-                Resource: !Ref LiteLLMSecret
+        - !Ref TaskExecutionSecretsPolicy
 
   TaskRole:
     Type: AWS::IAM::Role
@@ -159,45 +279,9 @@ Resources:
             Principal:
               Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: BedrockAccess
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - bedrock:InvokeModel
-                  - bedrock:InvokeModelWithResponseStream
-                Resource: !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
-              - Effect: Allow
-                Action:
-                  - bedrock:CallWithBearerToken
-                Resource: "*"
-        - PolicyName: CloudWatchLogs
-          PolicyDocument:
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: "*"
-        # DynamoDB access for JWT middleware (conditional)
-        - !If
-          - UseJwtMiddleware
-          - PolicyName: DynamoDBAccess
-            PolicyDocument:
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - dynamodb:GetItem
-                    - dynamodb:PutItem
-                    - dynamodb:Query
-                    - dynamodb:Scan
-                  Resource: !Sub
-                    - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${TableName}"
-                    - TableName: !ImportValue
-                        Fn::Sub: "${UserKeyMappingStackName}-TableName"
-          - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Ref TaskBedrockAccessPolicy
+        - !If [UseJwtMiddleware, !Ref TaskDynamoDBAccessPolicy, !Ref AWS::NoValue]
 
   # --- Security Groups ---
 
@@ -209,9 +293,84 @@ Resources:
         Fn::Sub: "${NetworkingStackName}-VpcId"
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
+          FromPort: 443
+          ToPort: 443
           CidrIp: !Ref AllowedCidr
+          Description: Allow ALB traffic from the configured CIDR
+      SecurityGroupEgress: []
+
+  ALBLogsBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_18
+            comment: This bucket is the ALB access-log destination; recursive server access logging is intentionally not enabled.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: This bucket is the ALB access-log destination; recursive server access logging is intentionally not enabled.
+      guard:
+        SuppressedRules:
+          - S3_BUCKET_NO_PUBLIC_RW_ACL: "AccessControl is explicitly set to Private; cfn-guard false positive triggered by missing property check."
+    Properties:
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteALBAccessLogs
+            Status: Enabled
+            ExpirationInDays: 90
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: 1
+
+  ALBLogsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ALBLogsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowALBLogDeliveryAclCheck
+            Effect: Allow
+            Principal:
+              Service: logdelivery.elasticloadbalancing.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt ALBLogsBucket.Arn
+          - Sid: AllowALBLogDeliveryWrite
+            Effect: Allow
+            Principal:
+              Service: logdelivery.elasticloadbalancing.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "${ALBLogsBucket.Arn}/AWSLogs/${AWS::AccountId}/*"
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt ALBLogsBucket.Arn
+              - !Sub "${ALBLogsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
 
   TaskSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -224,9 +383,16 @@ Resources:
           FromPort: !If [UseJwtMiddleware, 8080, 4000]
           ToPort: !If [UseJwtMiddleware, 8080, 4000]
           SourceSecurityGroupId: !Ref ALBSecurityGroup
+          Description: Allow ALB traffic to the active service port
+      SecurityGroupEgress: []
 
   DBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F1000
+            reason: "DB security group intentionally has no outbound rules; SecurityGroupEgress: [] removes default allow-all egress."
     Properties:
       GroupDescription: LiteLLM RDS - inbound from ECS task
       VpcId: !ImportValue
@@ -236,6 +402,46 @@ Resources:
           FromPort: 5432
           ToPort: 5432
           SourceSecurityGroupId: !Ref TaskSecurityGroup
+          Description: Allow PostgreSQL traffic from ECS tasks
+      SecurityGroupEgress: []
+
+  ALBToTaskEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ALBSecurityGroup
+      IpProtocol: tcp
+      FromPort: !If [UseJwtMiddleware, 8080, 4000]
+      ToPort: !If [UseJwtMiddleware, 8080, 4000]
+      DestinationSecurityGroupId: !Ref TaskSecurityGroup
+      Description: Allow ALB to reach ECS tasks on the active service port
+
+  TaskToDBEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref TaskSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DBSecurityGroup
+      Description: Allow ECS tasks to reach PostgreSQL
+
+  TaskHttpsEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: LiteLLM tasks require HTTPS egress to AWS APIs (Bedrock, Secrets Manager) and external HTTPS endpoints.
+      guard:
+        SuppressedRules:
+          - EC2_SECURITY_GROUP_EGRESS_OPEN_TO_WORLD_RULE: "LiteLLM tasks require HTTPS egress to AWS Bedrock and Secrets Manager APIs; restricted to port 443 only."
+    Properties:
+      GroupId: !Ref TaskSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+      Description: Allow ECS tasks to reach AWS APIs and external HTTPS endpoints
 
   # --- RDS ---
 
@@ -248,22 +454,41 @@ Resources:
         - !ImportValue
           Fn::Sub: "${NetworkingStackName}-SubnetIds"
 
+  RDSMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: monitoring.rds.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+
   RDSInstance:
     Type: AWS::RDS::DBInstance
     Properties:
       DBName: litellm
       DBInstanceClass: db.t4g.micro
       Engine: postgres
-      EngineVersion: "16"
-      MasterUsername: litellm
+      EngineVersion: !Ref DBEngineVersion
+      MasterUsername: !Ref DBUsername
       MasterUserPassword: !Ref DBPassword
       AllocatedStorage: "20"
       StorageEncrypted: true
+      EnableIAMDatabaseAuthentication: true
+      MultiAZ: true
+      MonitoringInterval: !Ref RDSMonitoringInterval
+      MonitoringRoleArn: !GetAtt RDSMonitoringRole.Arn
       DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
       VPCSecurityGroups:
         - !Ref DBSecurityGroup
       DeletionProtection: true
       BackupRetentionPeriod: 7
+      AutoMinorVersionUpgrade: true
 
   # --- ECS ---
 
@@ -271,12 +496,16 @@ Resources:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: !Sub "${AWS::StackName}-cluster"
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
       CapacityProviders: [FARGATE]
 
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/ecs/${AWS::StackName}"
+      KmsKeyId: !GetAtt LiteLLMKmsKey.Arn
       RetentionInDays: 30
 
   TaskDefinition:
@@ -300,7 +529,7 @@ Resources:
             - Name: AWS_REGION
               Value: !Ref AwsRegion
             - Name: DATABASE_URL
-              Value: !Sub "postgresql://litellm:${DBPassword}@${RDSInstance.Endpoint.Address}:5432/litellm"
+              Value: !Sub "postgresql://${DBUsername}:${DBPassword}@${RDSInstance.Endpoint.Address}:5432/litellm"
             # LiteLLM OTEL configuration — only injected when OTel is enabled
             - !If
               - OtelEnabled
@@ -374,6 +603,7 @@ Resources:
 
   ALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: ALBLogsBucketPolicy
     Properties:
       Type: application
       Subnets: !Split
@@ -382,6 +612,15 @@ Resources:
           Fn::Sub: "${NetworkingStackName}-SubnetIds"
       SecurityGroups:
         - !Ref ALBSecurityGroup
+      LoadBalancerAttributes:
+        - Key: routing.http.drop_invalid_header_fields.enabled
+          Value: "true"
+        - Key: access_logs.s3.enabled
+          Value: "true"
+        - Key: access_logs.s3.bucket
+          Value: !Ref ALBLogsBucket
+        - Key: access_logs.s3.prefix
+          Value: "alb"
 
   ALBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -399,8 +638,11 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn: !Ref ALB
-      Port: 80
-      Protocol: HTTP
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates:
+        - CertificateArn: !Ref AlbCertificateArn
       DefaultActions:
         - Type: forward
           TargetGroupArn: !Ref ALBTargetGroup
@@ -435,7 +677,10 @@ Resources:
 Outputs:
   GatewayEndpoint:
     Description: LiteLLM gateway URL - set as OPENAI_BASE_URL in Codex config
-    Value: !Sub "http://${ALB.DNSName}/v1"
+    Value: !If
+      - HasAlbDomainName
+      - !Sub "https://${AlbDomainName}/v1"
+      - !Sub "https://${ALB.DNSName}/v1"
     Export:
       Name: !Sub "${AWS::StackName}-GatewayEndpoint"
 

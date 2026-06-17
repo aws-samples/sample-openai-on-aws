@@ -17,7 +17,115 @@ Parameters:
     Default: us-east-1
     Description: Region where metrics log group exists
 
+  LambdaReservedConcurrentExecutions:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    Description: Reserved concurrency limit for Lambda functions in this stack.
+
 Resources:
+  DashboardKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "${AWS::StackName} dashboard data key"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableIAMPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  DashboardKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-dashboard'
+      TargetKeyId: !Ref DashboardKmsKey
+
+  CustomWidgetPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} CloudWatch dashboard widget Lambda permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:StartQuery
+              - logs:GetQueryResults
+              - logs:StopQuery
+              - logs:DescribeLogGroups
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - servicequotas:GetServiceQuota
+              - servicequotas:ListServiceQuotas
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - cloudwatch:GetMetricStatistics
+              - cloudwatch:GetMetricData
+              - cloudwatch:ListMetrics
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - dynamodb:Query
+              - dynamodb:GetItem
+              - dynamodb:BatchGetItem
+              - dynamodb:Scan
+            Resource:
+              - !GetAtt MetricsTable.Arn
+              - !Sub '${MetricsTable.Arn}/index/*'
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt DashboardLambdaDLQ.Arn
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !GetAtt DashboardKmsKey.Arn
+
+  MetricsAggregatorRolePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: !Sub "${AWS::StackName} metrics aggregator Lambda permissions"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:StartQuery
+              - logs:GetQueryResults
+              - logs:StopQuery
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - cloudwatch:PutMetricData
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:BatchWriteItem
+              - dynamodb:UpdateItem
+              - dynamodb:GetItem
+            Resource:
+              - !GetAtt MetricsTable.Arn
+          - Effect: Allow
+            Action:
+              - sqs:SendMessage
+            Resource: !GetAtt DashboardLambdaDLQ.Arn
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !GetAtt DashboardKmsKey.Arn
+
   # DynamoDB Table for Metrics Storage
   MetricsTable:
     Type: AWS::DynamoDB::Table
@@ -74,6 +182,12 @@ Resources:
       TimeToLiveSpecification:
         AttributeName: ttl
         Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !GetAtt DashboardKmsKey.Arn
       Tags:
         - Key: Name
           Value: CodexMetrics
@@ -114,50 +228,7 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: CloudWatchLogsQuery
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:StartQuery
-                  - logs:GetQueryResults
-                  - logs:StopQuery
-                  - logs:DescribeLogGroups
-                Resource: '*'
-        - PolicyName: ServiceQuotasAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - servicequotas:GetServiceQuota
-                  - servicequotas:ListServiceQuotas
-                Resource: '*'
-        - PolicyName: CloudWatchMetricsAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cloudwatch:GetMetricStatistics
-                  - cloudwatch:GetMetricData
-                  - cloudwatch:ListMetrics
-                Resource: '*'
-        - PolicyName: DynamoDBReadAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:Query
-                  - dynamodb:GetItem
-                  - dynamodb:BatchGetItem
-                  - dynamodb:Scan
-                Resource:
-                  - !GetAtt MetricsTable.Arn
-                  - !Sub '${MetricsTable.Arn}/index/*'
+        - !Ref CustomWidgetPolicy
 
   MetricsAggregatorRole:
     Type: AWS::IAM::Role
@@ -171,43 +242,31 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: CloudWatchLogsAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - logs:StartQuery
-                  - logs:GetQueryResults
-                  - logs:StopQuery
-                  - logs:DescribeLogGroups
-                  - logs:DescribeLogStreams
-                Resource: '*'
-        - PolicyName: CloudWatchMetricsPublish
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - cloudwatch:PutMetricData
-                Resource: '*'
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:PutItem
-                  - dynamodb:BatchWriteItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:GetItem
-                Resource:
-                  - !GetAtt MetricsTable.Arn
+        - !Ref MetricsAggregatorRolePolicy
+
+  DashboardLambdaDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub '${AWS::StackName}-lambda-dlq'
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 1209600
 
   MetricsAggregatorFunction:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch and DynamoDB public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch and DynamoDB public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-MetricsAggregator
       Description: Aggregates Codex logs into CloudWatch Metrics
       Runtime: python3.12
@@ -215,6 +274,9 @@ Resources:
       Role: !GetAtt MetricsAggregatorRole.Arn
       Timeout: 120
       MemorySize: 512
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Environment:
         Variables:
           METRICS_LOG_GROUP: !Ref MetricsLogGroup
@@ -245,12 +307,28 @@ Resources:
 
   TotalTokensWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-TotalTokens
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -263,12 +341,28 @@ Resources:
 
   OperationsCountWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-OperationsCount
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -280,12 +374,28 @@ Resources:
 
   ActiveUsersWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch and DynamoDB public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch and DynamoDB public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-ActiveUsers
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -299,12 +409,28 @@ Resources:
 
   TokenByModelWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-TokenByModel
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -316,12 +442,28 @@ Resources:
 
   CacheEfficiencyWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-CacheEfficiency
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -334,12 +476,28 @@ Resources:
 
   TopUsersWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch and DynamoDB public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch and DynamoDB public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-TopUsers
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -353,12 +511,28 @@ Resources:
 
   OperationsByTypeWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-OperationsByType
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -370,12 +544,28 @@ Resources:
 
   TokenUsageByTypeWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-TokenUsageByType
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -387,12 +577,28 @@ Resources:
 
   CodeGenerationByLanguageWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-CodeGenByLanguage
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -404,12 +610,28 @@ Resources:
 
   LinesOfCodeWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-LinesOfCode
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -421,12 +643,28 @@ Resources:
 
   CommitsWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-Commits
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -438,12 +676,28 @@ Resources:
 
   CodeAcceptanceWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-CodeAcceptance
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer
@@ -455,12 +709,28 @@ Resources:
 
   ActiveHoursWidget:
     Type: AWS::Lambda::Function
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_117
+            comment: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: This dashboard Lambda calls CloudWatch public service APIs; VPC placement would require NAT or interface endpoints and is left to deployment architecture.
+      guard:
+        SuppressedRules:
+          - LAMBDA_CONCURRENCY_CHECK: "ReservedConcurrentExecutions is set via CloudFormation parameter (type Number >=0); cfn-guard cannot resolve parameter Refs to integers at analysis time."
     Properties:
+      ReservedConcurrentExecutions: !Ref LambdaReservedConcurrentExecutions
       FunctionName: Codex-Widget-ActiveHours
       Runtime: python3.11
       Handler: index.lambda_handler
       Role: !GetAtt CustomWidgetRole.Arn
       Timeout: 60
+      KmsKeyArn: !GetAtt DashboardKmsKey.Arn
+      DeadLetterConfig:
+        TargetArn: !GetAtt DashboardLambdaDLQ.Arn
       Layers:
         - !Ref QueryUtilsLayer
         - !Ref MetricsUtilsLayer

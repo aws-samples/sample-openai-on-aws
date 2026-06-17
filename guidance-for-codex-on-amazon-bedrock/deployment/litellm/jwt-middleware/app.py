@@ -65,7 +65,7 @@ retry = Retry(
     backoff_factor=0.5,
     status_forcelist=[500, 502, 503, 504],
 )
-session.mount('http://', HTTPAdapter(max_retries=retry))
+session.mount('http://', HTTPAdapter(max_retries=retry))  # nosec # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-session-with-http
 session.mount('https://', HTTPAdapter(max_retries=retry))
 
 
@@ -84,7 +84,7 @@ def get_jwks():
             return response.json()
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch JWKS: {e}")
+        logger.warning(f"Failed to fetch JWKS: {e}")
         raise
 
 
@@ -424,4 +424,4 @@ if __name__ == '__main__':
     logger.info(f"JWKS URL: {JWKS_URL}")
     logger.info(f"DynamoDB Table: {DYNAMODB_TABLE}")
 
-    app.run(host='0.0.0.0', port=8080, debug=False)
+    app.run(host='0.0.0.0', port=8080, debug=False)  # nosec B104 # nosemgrep: python.flask.security.audit.avoid_app_run_with_bad_host
