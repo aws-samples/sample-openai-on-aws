@@ -65,6 +65,8 @@ retry = Retry(
     backoff_factor=0.5,
     status_forcelist=[500, 502, 503, 504],
 )
+# HTTP adapter mounted for the co-located LiteLLM sidecar (LITELLM_URL, default http://localhost:4000).
+# All external calls (JWKS_URL) use HTTPS. Do not use this session for non-localhost HTTP endpoints.
 session.mount('http://', HTTPAdapter(max_retries=retry))  # nosec # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-session-with-http
 session.mount('https://', HTTPAdapter(max_retries=retry))
 
