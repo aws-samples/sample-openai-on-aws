@@ -126,7 +126,7 @@ aws cloudformation deploy \
       LiteLLMMasterKey="$LITELLM_MASTER_KEY" \
       DBUsername=litellm \
       DBPassword="$DB_PASSWORD" \
-      AwsRegion="$AWS_REGION" \
+      AwsRegion="$BEDROCK_REGION" \
       LiteLLMImage="$LITELLM_IMAGE" \
       AlbCertificateArn="$ALB_CERTIFICATE_ARN" \
       AlbDomainName="$GATEWAY_DOMAIN_NAME" \

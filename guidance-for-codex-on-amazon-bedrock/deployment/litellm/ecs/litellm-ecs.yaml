@@ -27,14 +27,6 @@ Parameters:
     NoEcho: true
     Description: LiteLLM master key - stored in Secrets Manager
 
-  BedrockMantleApiKey:
-    Type: String
-    NoEcho: true
-    Description: >
-      Bedrock Mantle API key for GPT-5.x and GPT-OSS models. Generate a short-term key
-      (valid 12h) using: pip install aws-bedrock-token-generator &&
-      python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())"
-
   DBPassword:
     Type: String
     NoEcho: true
@@ -62,6 +54,7 @@ Parameters:
   AwsRegion:
     Type: String
     Default: us-east-1
+    Description: Amazon Bedrock region for upstream model calls. The tested walkthrough uses us-east-1.
 
   LiteLLMImage:
     Type: String
@@ -72,10 +65,10 @@ Parameters:
     Description: >
       Required. Fully-qualified container image reference for the LiteLLM
       gateway. Build a custom image using deployment/litellm/Dockerfile
-      (FROM ghcr.io/berriai/litellm:main-latest plus COPY litellm_config.yaml
-      /app/config.yaml), push it to ECR, and pass the image URI here. The
-      upstream ghcr.io/berriai/litellm image has no /app/config.yaml and will
-      crash-loop on startup.
+      (FROM ghcr.io/berriai/litellm:main-latest plus the repo's config and
+      Mantle token-refresh entrypoint), push it to ECR, and pass the image URI
+      here. The upstream ghcr.io/berriai/litellm image lacks the sample config
+      and startup wrapper and will crash-loop on startup.
 
   AllowedCidr:
     Type: String
@@ -95,7 +88,7 @@ Parameters:
   AlbDomainName:
     Type: String
     Default: ""
-    Description: Optional DNS name that resolves to the ALB and matches AlbCertificateArn. Used in the GatewayEndpoint output.
+    Description: Optional DNS name that resolves to the ALB and matches AlbCertificateArn. Recommended for trusted HTTPS; if omitted, GatewayEndpoint falls back to the raw ALB DNS name for low-level smoke testing only.
 
   # JWT Middleware Parameters (optional - for OIDC authentication)
   EnableJwtMiddleware:
@@ -191,18 +184,18 @@ Resources:
       checkov:
         skip:
           - id: CKV_AWS_108
-            comment: Secret contains externally-supplied API keys and DB password provided as stack parameters; automated rotation requires application-specific Lambda not deployed here.
+            comment: Secret stores the LiteLLM admin key. Automated rotation is not included in this reference stack.
       cfn_nag:
         rules_to_suppress:
           - id: W77
-            reason: Secret contains externally-supplied API keys and DB password provided as stack parameters; automated rotation requires application-specific Lambda not deployed here.
+            reason: Secret stores the LiteLLM admin key. Automated rotation is not included in this reference stack.
       guard:
         SuppressedRules:
-          - SECRETSMANAGER_ROTATION_ENABLED_CHECK: "Secret contains externally-supplied API keys and DB password; automated rotation requires application-specific Lambda not deployed here."
+          - SECRETSMANAGER_ROTATION_ENABLED_CHECK: "Secret stores the LiteLLM admin key. Automated rotation is not included in this reference stack."
     Properties:
       Name: !Sub "${AWS::StackName}/litellm-secrets"
       KmsKeyId: !Ref LiteLLMKmsKey
-      SecretString: !Sub '{"LITELLM_MASTER_KEY":"${LiteLLMMasterKey}","BEDROCK_MANTLE_API_KEY":"${BedrockMantleApiKey}"}'
+      SecretString: !Sub '{"LITELLM_MASTER_KEY":"${LiteLLMMasterKey}"}'
 
   # --- IAM ---
 
@@ -211,18 +204,27 @@ Resources:
     Properties:
       Description: !Sub "${AWS::StackName} ECS task execution secrets access"
       PolicyDocument:
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Action:
               - secretsmanager:GetSecretValue
               - secretsmanager:DescribeSecret
             Resource: !Ref LiteLLMSecret
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+            Resource: !GetAtt LiteLLMKmsKey.Arn
+            Condition:
+              StringEquals:
+                kms:ViaService: !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
 
   TaskBedrockAccessPolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
       Description: !Sub "${AWS::StackName} ECS task Bedrock access"
       PolicyDocument:
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Action:
@@ -236,6 +238,25 @@ Resources:
             Condition:
               StringEquals:
                 aws:RequestedRegion: !Ref AwsRegion
+          # GPT-5.x on Bedrock Mantle is a separate service namespace
+          # (bedrock-mantle). The /openai/v1/responses path maps to the
+          # bedrock-mantle:CreateInference action on the default project.
+          - Effect: Allow
+            Action:
+              - bedrock-mantle:CreateInference
+              - bedrock-mantle:GetInference
+              - bedrock-mantle:CancelInference
+            Resource: !Sub "arn:${AWS::Partition}:bedrock-mantle:*:${AWS::AccountId}:project/*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AwsRegion
+          - Effect: Allow
+            Action:
+              - bedrock-mantle:CallWithBearerToken
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AwsRegion
 
   TaskDynamoDBAccessPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -243,6 +264,7 @@ Resources:
     Properties:
       Description: !Sub "${AWS::StackName} ECS task DynamoDB access for JWT middleware"
       PolicyDocument:
+        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Action:
@@ -315,6 +337,9 @@ Resources:
           - S3_BUCKET_NO_PUBLIC_RW_ACL: "AccessControl is explicitly set to Private; cfn-guard false positive triggered by missing property check."
     Properties:
       AccessControl: Private
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerPreferred
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -357,10 +382,7 @@ Resources:
             Principal:
               Service: logdelivery.elasticloadbalancing.amazonaws.com
             Action: s3:PutObject
-            Resource: !Sub "${ALBLogsBucket.Arn}/AWSLogs/${AWS::AccountId}/*"
-            Condition:
-              StringEquals:
-                s3:x-amz-acl: bucket-owner-full-control
+            Resource: !Sub "${ALBLogsBucket.Arn}/alb/AWSLogs/${AWS::AccountId}/*"
           - Sid: DenyInsecureTransport
             Effect: Deny
             Principal: "*"
@@ -469,6 +491,8 @@ Resources:
 
   RDSInstance:
     Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       DBName: litellm
       DBInstanceClass: db.t4g.micro
@@ -486,7 +510,9 @@ Resources:
       PubliclyAccessible: false
       VPCSecurityGroups:
         - !Ref DBSecurityGroup
-      DeletionProtection: true
+      # Keep the reference stack deletable for end-to-end testing; enable
+      # deletion protection separately for long-lived production environments.
+      DeletionProtection: false
       BackupRetentionPeriod: 7
       AutoMinorVersionUpgrade: true
 
@@ -528,6 +554,10 @@ Resources:
           Environment:
             - Name: AWS_REGION
               Value: !Ref AwsRegion
+            - Name: AWS_DEFAULT_REGION
+              Value: !Ref AwsRegion
+            - Name: BEDROCK_MANTLE_REGION
+              Value: !Ref AwsRegion
             - Name: DATABASE_URL
               Value: !Sub "postgresql://${DBUsername}:${DBPassword}@${RDSInstance.Endpoint.Address}:5432/litellm"
             # LiteLLM OTEL configuration — only injected when OTel is enabled
@@ -555,8 +585,6 @@ Resources:
           Secrets:
             - Name: LITELLM_MASTER_KEY
               ValueFrom: !Sub "${LiteLLMSecret}:LITELLM_MASTER_KEY::"
-            - Name: BEDROCK_MANTLE_API_KEY
-              ValueFrom: !Sub "${LiteLLMSecret}:BEDROCK_MANTLE_API_KEY::"
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -676,7 +704,7 @@ Resources:
 
 Outputs:
   GatewayEndpoint:
-    Description: LiteLLM gateway URL - set as OPENAI_BASE_URL in Codex config
+    Description: LiteLLM gateway URL. When AlbDomainName is blank, this falls back to the raw ALB DNS name and is suitable only for low-level smoke testing because the ACM certificate will not match that hostname.
     Value: !If
       - HasAlbDomainName
       - !Sub "https://${AlbDomainName}/v1"

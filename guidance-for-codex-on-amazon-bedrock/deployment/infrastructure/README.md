@@ -175,7 +175,7 @@ Outputs: `VpcId`, `SubnetIds`, `CollectorEndpoint` (exported as
 | `LiteLLMMasterKey`         | String  | —                          | `NoEcho`. Stored in Secrets Manager. |
 | `DBUsername`               | String  | —                          | `NoEcho`. RDS PostgreSQL username. |
 | `DBPassword`               | String  | —                          | `NoEcho`. RDS PostgreSQL password. |
-| `AwsRegion`                | String  | `us-east-1`                | Bedrock region for upstream calls. |
+| `AwsRegion`                | String  | `us-east-2`                | Bedrock region for upstream calls. Use `us-east-2` for the default GPT-5.4 / GPT-5.5 Mantle setup. |
 | `LiteLLMImage`             | String  | —                          | Required. Fully-qualified ECR URI. |
 | `AllowedCidr`              | String  | `10.0.0.0/8`               | ALB ingress CIDR. **Never** `0.0.0.0/0`. |
 | `AlbCertificateArn`        | String  | —                          | Required ACM certificate ARN for HTTPS listener. |

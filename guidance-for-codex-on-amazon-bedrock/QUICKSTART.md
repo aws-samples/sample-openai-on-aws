@@ -192,16 +192,16 @@ When you deploy the LiteLLM reference stacks:
 
 | Model ID | Notes |
 |----------|-------|
-| `openai.gpt-5.5` | Preferred default where available. Latest GPT-5 model recommended by OpenAI for Codex. `us-east-2` only. |
-| `openai.gpt-5.4` | Fallback when you need broader Bedrock regional coverage. `us-east-2`, `us-west-2`. |
+| `openai.gpt-5.5` | Preferred default where available. Latest GPT-5 model recommended by OpenAI for Codex. |
+| `openai.gpt-5.4` | Useful fallback when your chosen Bedrock region or account does not expose `openai.gpt-5.5` yet. |
 
 OpenAI recommends the latest GPT-5 family model for Codex. In this repo,
-prefer `openai.gpt-5.5` when your Bedrock region supports it, and use
-`openai.gpt-5.4` when you need the wider regional coverage in the full matrix.
+prefer `openai.gpt-5.5` when your Bedrock region and account support it, and
+use `openai.gpt-5.4` when you need a fallback.
 
-**Regions:** GPT-5.5: `us-east-2` only. GPT-5.4: `us-east-2`, `us-west-2`.
-
-Full region × model matrix: **[docs/reference-regions.md](docs/reference-regions.md)**
+Do not treat this repository as the source of truth for region availability.
+Check the current AWS Bedrock model docs and verify directly in your account
+with `aws bedrock list-foundation-models --region <region>`.
 
 ---
 
@@ -221,7 +221,7 @@ Full region × model matrix: **[docs/reference-regions.md](docs/reference-region
 - **[docs/operate-troubleshooting.md](docs/operate-troubleshooting.md)** — Common issues and fixes
 
 ### Reference
-- **[docs/reference-regions.md](docs/reference-regions.md)** — Supported regions and models
+- **[docs/reference-regions.md](docs/reference-regions.md)** — How to verify current AWS region and model availability
 
 ---
 

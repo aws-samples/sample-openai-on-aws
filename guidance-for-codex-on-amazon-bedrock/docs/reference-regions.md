@@ -1,66 +1,50 @@
-# Reference — Regions & Models
+# Reference — Region Availability
 
-Single source of truth for "where can I run Codex on Bedrock, and with which
-model IDs." Cross-check against the authoritative AWS GPT-5.4/GPT-5.5-on-Bedrock
-getting-started guide — if that guide disagrees, it takes precedence.
+This repository does not maintain a hard-coded Bedrock region × model matrix.
+Availability changes over time, can differ by account, and should be verified
+against current AWS documentation and your own AWS account.
 
-## Partitions
+OpenAI recommends the latest GPT-5 family model for Codex. In practice, prefer
+`openai.gpt-5.5` when your Bedrock region and account support it, and use
+`openai.gpt-5.4` when you need a fallback. The custom-provider examples in this
+repo keep `wire_api = "responses"` explicit for clarity, although Responses is
+already the default for Codex custom providers.
 
-| Partition | Supported | Notes |
-|---|---|---|
-| `aws` (commercial) | Yes | US commercial regions only. See matrix below. |
-| `aws-us-gov` (GovCloud) | Not yet | No OpenAI models published in GovCloud Bedrock at time of writing. Open question for FedRAMP customers (see PLAN). |
-| `aws-cn` (China) | Not yet | Not on the OpenAI-on-Bedrock roadmap at time of writing. |
+## Source of truth
 
-## Region × model matrix
-
-Run `aws bedrock list-foundation-models --region <region>` to check availability
-in any region as access expands.
-
-| Model ID | Endpoint | Regions | API | Notes |
-|---|---|---|---|---|
-| `openai.gpt-5.5` | Mantle | `us-east-2` | Responses only | Preferred default where available. Latest GPT-5 model recommended by OpenAI for Codex. |
-| `openai.gpt-5.4` | Mantle | `us-east-2`, `us-west-2`, `us-gov-west-1` | Responses only | Fallback when you need broader Bedrock regional coverage. |
-| `openai.gpt-oss-safeguard-120b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions | Maps to `gpt-4o` alias in gateway. |
-| `openai.gpt-oss-safeguard-20b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions | Maps to `gpt-4o-mini` alias in gateway. |
-| `openai.gpt-oss-120b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions + Responses | Full API support. |
-| `openai.gpt-oss-20b` | Mantle | `us-east-2`, `us-west-2`, `us-east-1` | Chat Completions + Responses | Full API support. |
-
-OpenAI recommends the latest GPT-5 family model for Codex. In practice,
-prefer `openai.gpt-5.5` when the target Bedrock region supports it, and use
-`openai.gpt-5.4` when you need wider regional coverage. The custom-provider
-examples in this repo keep `wire_api = "responses"` explicit for clarity,
-although Responses is already the default for Codex custom providers.
-
-The LiteLLM gateway config uses `us-east-2` for both models (single Bedrock API key scope). For GPT-5.4 in `us-west-2` or `us-gov-west-1`, update `api_base` in `litellm_config.yaml` and regenerate the key with `AWS_DEFAULT_REGION=<region>`.
+- AWS Bedrock documentation for OpenAI model availability is the source of truth.
+- Account-level verification is the final check: a model may exist in AWS docs
+  but still require model access or account enablement in your region.
 
 ## Endpoints
 
-- **Mantle (OpenAI-compatible API):** `bedrock-mantle.<region>.api.aws/openai/v1` — serves GPT-5.4, GPT-5.5, and GPT-OSS models. The LiteLLM Gateway uses the `openai/<model>` model string and proxies Codex Responses API traffic straight to Bedrock Mantle.
+- **Mantle (OpenAI-compatible API):** `bedrock-mantle.<region>.api.aws/openai/v1` — serves GPT-5.4, GPT-5.5, and GPT-OSS models. The LiteLLM Gateway uses LiteLLM's `bedrock_mantle/<model>` provider and keeps Codex traffic on the OpenAI-compatible Responses path.
 
-> **Note:** The LiteLLM gateway config uses `us-east-2` for both GPT-5.4 and GPT-5.5 because the Bedrock API key must be scoped to a single region. GPT-5.4 is also available in `us-west-2` and `us-gov-west-1` — override the `api_base` and set `AWS_DEFAULT_REGION=<region>` when generating the key if you need a different region.
+> **Note:** The LiteLLM gateway sample in this repo now resolves the Mantle
+> endpoint from the gateway's selected Bedrock region. The tested walkthrough
+> uses `us-east-1`, but the same image can target a different region as long as
+> the gateway mints the bearer token and calls the Mantle endpoint in that same
+> region.
 
-Authenticates with a Bedrock API key as a Bearer token (`Authorization: Bearer <key>`). Generate a short-term key (12h) from your IAM credentials:
+Under the hood, Mantle authenticates with a Bearer token
+(`Authorization: Bearer <key>`). The LiteLLM gateway sample in this repo now
+refreshes `AWS_BEARER_TOKEN_BEDROCK` automatically from the gateway's AWS
+credentials using the official `aws-bedrock-token-generator` package. For
+direct manual API testing, you can still generate a short-term key (12h) from
+your IAM credentials:
 ```bash
 pip install aws-bedrock-token-generator
 python -c "from aws_bedrock_token_generator import provide_token; print(provide_token())"
 ```
 
-## Quotas
+## How to verify availability
 
-Per-account Bedrock invoke quotas apply. Check the Service Quotas console under
-**Amazon Bedrock** and filter by the specific model ID. The AWS guide does not
-publish a public default quota number; confirm with your AWS account team for
-GPT-5.4 before a production rollout.
-
-For live dashboards of quota consumption, see `operate-monitoring.md` ("Quota
-monitoring" section).
-
-## Verifying availability yourself
+1. Check the current AWS Bedrock documentation for the model you want.
+2. Verify the model appears in your account for the target region:
 
 ```bash
 aws bedrock list-foundation-models \
-  --region us-west-2 \
+  --region <region> \
   --query "modelSummaries[?contains(modelId,'openai')].modelId" \
   --output text
 ```
@@ -68,3 +52,11 @@ aws bedrock list-foundation-models \
 If a model ID you need is not in that list, model access is likely not enabled
 for the account in that region. Request access in the **Amazon Bedrock** →
 **Model access** console page.
+
+## Quotas
+
+Per-account Bedrock invoke quotas apply. Check the Service Quotas console under
+**Amazon Bedrock** and filter by the specific model ID.
+
+For live dashboards of quota consumption, see `operate-monitoring.md` ("Quota
+monitoring" section).
