@@ -49,7 +49,7 @@ Question 1: Do you need HARD quota enforcement?
 | **IAM Identity Center Required?** | ✅ Yes | ❌ No |
 | **Path to Bedrock** | Codex → Bedrock (native AWS SDK) | Codex → Gateway → Bedrock |
 | **Developer Command** | `aws sso login` | `export OPENAI_API_KEY=...` |
-| **Per-user CloudTrail Audit** | ✅ Native | ✅ Gateway logs |
+| **Per-user Bedrock CloudTrail / CUR** | ✅ Native | ❌ Gateway role only |
 | **Hard Budget Limits** | ❌ No | ✅ Provided by gateway |
 | **Per-team Quotas** | ❌ No | ✅ Provided by gateway |
 | **Rate Limiting (RPM/TPM)** | ❌ No | ✅ Provided by gateway |
@@ -67,6 +67,11 @@ Question 1: Do you need HARD quota enforcement?
 > Lambda or DynamoDB table for them. See
 > [`docs/QUICKSTART_LLM_GATEWAY.md`](docs/QUICKSTART_LLM_GATEWAY.md#quota-enforcement)
 > for concrete examples.
+>
+> **Attribution note:** Native AWS Access preserves per-user attribution in
+> Bedrock CloudTrail and CUR. On the gateway path, Bedrock CloudTrail and CUR
+> see the gateway IAM role; per-user reporting comes from the gateway's own
+> telemetry and spend logs.
 
 ---
 
@@ -133,7 +138,7 @@ Capabilities depend on the gateway you deploy. Most OpenAI-compatible gateways p
 - **Per-user and per-team budgets** — gateway tracks spend and blocks when limits hit
 - **Rate limiting** — requests per minute (RPM) and tokens per minute (TPM)
 - **Model access policies** — control which teams can use which models
-- **Cost attribution** — per user, team, or department for chargeback
+- **Cost attribution** — per user, team, or department for chargeback through gateway telemetry and spend logs
 - **Centralized policy management** — update limits without touching developer machines
 - **Built-in telemetry** — gateways typically emit their own metrics, spend logs, and traces
 
@@ -147,9 +152,14 @@ Corporate IdP (Okta/Azure) → OIDC/JWT → LLM Gateway → Bedrock
                                         Model routing
 ```
 
+> **Attribution note:** On the gateway path, Amazon Bedrock CloudTrail and CUR
+> attribute requests to the gateway IAM role. Per-user or per-team reporting
+> comes from gateway-native telemetry keyed off your JWT or API-key identity,
+> not native Bedrock CloudTrail.
+
 ### Gateway Choices
 
-Any OpenAI-compatible gateway works — **[LiteLLM](https://www.litellm.ai/)**, **[Portkey](https://portkey.ai/)**, **[Bifrost](https://github.com/maximhq/bifrost)**, **[Kong AI Gateway](https://konghq.com/products/kong-ai-gateway)**, **[Helicone](https://helicone.ai/)**, the [AWS Bedrock Gateway sample](https://github.com/aws-samples/bedrock-access-gateway), or a custom FastAPI shim. Choose whichever matches your operational posture.
+Any OpenAI-compatible gateway works — **[LiteLLM](https://www.litellm.ai/)**, **[Portkey](https://portkey.ai/)**, **[Bifrost](https://github.com/maximhq/bifrost)**, **[Kong AI Gateway](https://konghq.com/products/kong-ai-gateway)**, **[Helicone](https://helicone.ai/)**, or a custom FastAPI shim. Choose whichever matches your operational posture.
 
 This repository ships **LiteLLM** as a reference implementation under `deployment/litellm/` — deployed on ECS Fargate via the CloudFormation templates in `deployment/litellm/ecs/`. If you bring your own gateway, deploy only the auth/networking stacks and point developers at your gateway URL.
 
@@ -180,7 +190,7 @@ When you deploy the LiteLLM reference stacks:
 | **IdP Setup** | Create new OIDC app in your IdP |
 | **Developer Workflow** | Change from `aws sso login` to API key |
 | **Codex Config** | Change `model_provider` from `amazon-bedrock` to custom provider name (e.g., `litellm-gateway`) |
-| **CloudTrail** | Attribution changes from per-user to gateway IAM role |
+| **Bedrock CloudTrail / CUR** | Attribution changes from per-user to gateway IAM role; per-user reporting moves to gateway telemetry |
 
 **Migration time:** 2-4 hours infrastructure + 1 hour per 10 developers for reconfiguration
 
@@ -223,6 +233,12 @@ with `aws bedrock list-foundation-models --region <region>`.
 ### Reference
 - **[docs/reference-regions.md](docs/reference-regions.md)** — How to verify current AWS region and model availability
 
+### Official Codex Docs
+- **[Managed configuration (`requirements.toml`)](https://developers.openai.com/codex/enterprise/managed-configuration#admin-enforced-requirements-requirementstoml)** — Admin-enforced approval, sandbox, permissions, hooks, and MCP allowlists
+- **[Sandbox and approvals](https://developers.openai.com/codex/concepts/sandboxing#configure-defaults)** — Recommended Codex approval and sandbox defaults
+- **[AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)** — Repo-level Codex instructions
+- **[Customization](https://developers.openai.com/codex/concepts/customization#next-step)** — Skills, plugins, MCP, and subagents
+
 ---
 
 ## Quick Setup with CloudFormation
@@ -258,9 +274,9 @@ aws cloudformation deploy \
   --region "$AWS_REGION"
 
 # Build and push the LiteLLM image to ECR first; see the full guide for the
-  # docker buildx commands and the LiteLLMImage / LiteLLMMasterKey /
-  # DBUsername / DBPassword / AlbCertificateArn values required by
-  # litellm-ecs.yaml.
+# docker buildx commands and the LiteLLMImage / LiteLLMMasterKey /
+# DBUsername / DBPassword / AlbCertificateArn values required by
+# litellm-ecs.yaml.
 aws cloudformation deploy \
   --stack-name codex-litellm-gateway \
   --template-file deployment/litellm/ecs/litellm-ecs.yaml \

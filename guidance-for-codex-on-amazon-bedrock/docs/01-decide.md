@@ -13,7 +13,7 @@ Two deployment patterns, in recommended order. Choose the first one your organiz
 | **IAM Identity Center Required?** | ✅ Yes | ❌ No |
 | **Path to Bedrock** | Codex → Bedrock (native AWS SDK) | Codex → Gateway → Bedrock |
 | **Developer Command** | `aws sso login` | `export OPENAI_API_KEY=...` |
-| **Per-user CloudTrail Audit** | ✅ Native | ✅ Gateway logs |
+| **Per-user Bedrock CloudTrail / CUR** | ✅ Native | ❌ Gateway role only |
 | **Soft Alerts (CloudWatch)** | Optional | Optional |
 | **Hard Budget Limits** | ❌ No | Optional |
 | **Per-team Quotas** | ❌ No | Optional |
@@ -56,16 +56,16 @@ enforcement. All of the following must apply:
       ~$90–150/mo + 0.1–0.25 FTE of ongoing ops.
 - [ ] You have an OIDC IdP that can issue JWTs to developer machines (for
       client → gateway auth).
-- [ ] You accept Codex running as a generic OpenAI provider (`model_provider
-      = "openai"` + custom `base_url`), bypassing the native `amazon-bedrock`
-      code path.
+- [ ] You accept Codex running through a custom gateway provider (for example
+      `model_provider = "litellm-gateway"` with a custom `base_url`),
+      bypassing the native `amazon-bedrock` code path.
 - [ ] Amazon Bedrock is activated in the region the gateway task role will
       call (see [reference-regions.md](reference-regions.md)).
 
 **Reference implementation:** this repository ships LiteLLM under
 `deployment/litellm/` as a working example. The pattern applies equally to
 other OpenAI-compatible gateways — **Portkey**, **Bifrost**, **Kong AI Gateway**,
-**Helicone**, the **AWS Bedrock Gateway** sample, or a custom FastAPI shim.
+**Helicone**, or a custom FastAPI shim.
 Choose whichever matches your organization's operational posture.
 
 *(Canonical deploy doc: [QUICKSTART_LLM_GATEWAY.md](QUICKSTART_LLM_GATEWAY.md).)*
@@ -93,9 +93,11 @@ Choose whichever matches your organization's operational posture.
 
 **Trade-offs:**
 
-- Pointing Codex at a gateway requires `model_provider = "openai"` with a custom `base_url`,
-  bypassing the native `amazon-bedrock` code path.
+- Pointing Codex at a gateway requires a custom provider definition with a custom
+  `base_url`, bypassing the native `amazon-bedrock` code path.
 - Gateway adds operational overhead (~$100-150/mo + 0.1-0.25 FTE).
+- Bedrock CloudTrail and CUR no longer identify end users on the gateway path;
+  use gateway-native telemetry and spend logs for per-user reporting.
 
 ## Open questions that may shift the pick
 

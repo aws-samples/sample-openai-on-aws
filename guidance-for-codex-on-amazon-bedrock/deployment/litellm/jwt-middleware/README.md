@@ -183,9 +183,10 @@ curl https://<gateway-url>/api/my-key \
 
 export JWT_TOKEN="eyJhbGc..."
 
-curl https://<gateway-url>/v1/chat/completions \
+curl https://<gateway-url>/v1/responses \
   -H "Authorization: Bearer $JWT_TOKEN" \
-  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hi"}]}'
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-5.5","input":"Hi"}'
 
 # Middleware:
 # 1. Validates JWT
