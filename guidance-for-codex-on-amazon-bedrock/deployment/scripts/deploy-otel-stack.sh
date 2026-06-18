@@ -32,6 +32,10 @@ Common options:
                                otherwise uses the default credential chain)
   --stack-prefix PREFIX        Prefix for all three stacks (default: codex-otel)
   --dashboard-name NAME        CloudWatch dashboard name (default: CodexOnBedrock)
+  --metrics-namespace NS       CloudWatch metrics namespace shared by the
+                               collector and dashboard (default: Codex). The
+                               same value is passed to both stacks so they
+                               cannot drift apart.
   --input-price N              USD per 1M input tokens (default: 0.15, placeholder)
   --output-price N             USD per 1M output tokens (default: 0.60, placeholder)
   --cached-input-price N       USD per 1M cached-input tokens (default: 0.075, placeholder)
@@ -76,6 +80,7 @@ region="us-west-2"
 aws_profile=""
 prefix="codex-otel"
 dashboard_name="CodexOnBedrock"
+metrics_namespace="Codex"
 input_price="0.15"
 output_price="0.60"
 cached_input_price="0.075"
@@ -91,6 +96,7 @@ while [[ $# -gt 0 ]]; do
     --aws-profile) aws_profile="${2:?--aws-profile requires a value}"; shift 2;;
     --stack-prefix) prefix="${2:?--stack-prefix requires a value}"; shift 2;;
     --dashboard-name) dashboard_name="${2:?--dashboard-name requires a value}"; shift 2;;
+    --metrics-namespace) metrics_namespace="${2:?--metrics-namespace requires a value}"; shift 2;;
     --input-price) input_price="${2:?--input-price requires a value}"; shift 2;;
     --output-price) output_price="${2:?--output-price requires a value}"; shift 2;;
     --cached-input-price) cached_input_price="${2:?--cached-input-price requires a value}"; shift 2;;
@@ -195,7 +201,7 @@ vpc_id=$(aws cloudformation describe-stacks --region "$region" --stack-name "$ne
 subnet_ids=$(aws cloudformation describe-stacks --region "$region" --stack-name "$net_stack" \
   --query "Stacks[0].Outputs[?OutputKey=='SubnetIds'].OutputValue" --output text)
 
-collector_params=(VpcId="$vpc_id" SubnetIds="$subnet_ids" CustomDomainName="$custom_domain" HostedZoneId="$hosted_zone_id")
+collector_params=(VpcId="$vpc_id" SubnetIds="$subnet_ids" CustomDomainName="$custom_domain" HostedZoneId="$hosted_zone_id" MetricsNamespace="$metrics_namespace")
 [[ -n "$oidc_issuer" ]]      && collector_params+=(OidcIssuerUrl="$oidc_issuer")
 [[ -n "$oidc_jwks" ]]        && collector_params+=(OidcJwksEndpoint="$oidc_jwks")
 [[ -n "$oidc_client_id" ]]   && collector_params+=(OidcClientId="$oidc_client_id")
@@ -226,6 +232,7 @@ aws cloudformation deploy \
   --template-file "$infra_dir/codex-otel-dashboard.yaml" \
   --parameter-overrides \
       DashboardName="$dashboard_name" \
+      MetricsNamespace="$metrics_namespace" \
       InputTokenPriceUsdPerMillion="$input_price" \
       OutputTokenPriceUsdPerMillion="$output_price" \
       CachedInputTokenPriceUsdPerMillion="$cached_input_price" \

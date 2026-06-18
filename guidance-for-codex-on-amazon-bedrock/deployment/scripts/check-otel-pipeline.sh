@@ -2,16 +2,20 @@
 set -e
 
 REGION="${1:-us-west-2}"
+# Must match the MetricsNamespace the collector publishes under
+# (deploy-otel-stack.sh default and otel-collector.yaml default: Codex).
+NAMESPACE="${2:-Codex}"
 
 echo "========================================="
 echo "OTEL Pipeline Diagnostics"
 echo "Region: ${REGION}"
+echo "Namespace: ${NAMESPACE}"
 echo "========================================="
 echo ""
 
 echo "STEP 1: Check if metrics exist in CloudWatch"
 echo "---------------------------------------------"
-aws cloudwatch list-metrics --namespace LiteLLMGateway --region "${REGION}" --output json | jq -r '.Metrics[] | "\(.MetricName) - Dimensions: \(.Dimensions | length)"' | head -10
+aws cloudwatch list-metrics --namespace "${NAMESPACE}" --region "${REGION}" --output json | jq -r '.Metrics[] | "\(.MetricName) - Dimensions: \(.Dimensions | length)"' | head -10
 echo ""
 
 echo "STEP 2: Check latest metric datapoints (last 2 hours)"
@@ -19,7 +23,7 @@ echo "-------------------------------------------------------"
 START_TIME=$(date -u -v-2H +%Y-%m-%dT%H:%M:%S)
 END_TIME=$(date -u +%Y-%m-%dT%H:%M:%S)
 aws cloudwatch get-metric-statistics \
-  --namespace LiteLLMGateway \
+  --namespace "${NAMESPACE}" \
   --metric-name gen_ai.client.operation.duration \
   --start-time "${START_TIME}" \
   --end-time "${END_TIME}" \

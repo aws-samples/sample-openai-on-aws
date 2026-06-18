@@ -153,7 +153,7 @@ Outputs (all exported): `VpcId`, `PublicSubnet1`, `PublicSubnet2`,
 | `VpcId`              | String             | —                                                | Required. Pass via `!ImportValue` from the networking stack. |
 | `SubnetIds`          | CommaDelimitedList | —                                                | At least 2 subnets (ALB requirement). |
 | `CollectorImage`     | String             | `public.ecr.aws/aws-observability/aws-otel-collector:latest` | ADOT image. |
-| `MetricsNamespace`   | String             | `LiteLLMGateway`                                 | CloudWatch metrics namespace. |
+| `MetricsNamespace`   | String             | `Codex`                                          | CloudWatch metrics namespace. Must match `codex-otel-dashboard.yaml`. |
 | `CustomDomainName`   | String             | —                                                | Required. HTTPS endpoint domain. |
 | `HostedZoneId`       | String             | —                                                | Required. Route53 zone for certificate validation. |
 | `OidcIssuerUrl`      | String             | `''`                                             | Optional: enable ALB JWT validation. |

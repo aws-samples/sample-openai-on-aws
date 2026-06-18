@@ -55,6 +55,7 @@ func run() int {
 	refreshIfNeededFlag := flag.Bool("refresh-if-needed", false, "refresh credentials only if expired or near expiry")
 	clearCacheFlag := flag.Bool("clear-cache", false, "clear cached credentials and force re-authentication")
 	setClientSecretFlag := flag.Bool("set-client-secret", false, "store Azure AD client secret in OS keyring")
+	getMonitoringTokenFlag := flag.Bool("get-monitoring-token", false, "print the cached OIDC monitoring token (used by otel-helper) and exit")
 	flag.Parse()
 
 	if *versionFlag {
@@ -106,6 +107,9 @@ func run() int {
 	if *checkExpirationFlag {
 		return runCheckExpiration(profileName, cfg.CredentialStorage)
 	}
+	if *getMonitoringTokenFlag {
+		return runGetMonitoringToken(profileName, cfg)
+	}
 	if *refreshIfNeededFlag {
 		return runRefreshIfNeeded(profileName, cfg)
 	}
@@ -153,6 +157,20 @@ func runCheckExpiration(profile string, credentialStorage string) int {
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "credentials valid, expires in %.0f seconds (%s)\n", remaining, creds.Expiration)
+	return 0
+}
+
+// runGetMonitoringToken prints the cached OIDC monitoring token to stdout for
+// otel-helper to consume. It is the counterpart of the --get-monitoring-token
+// flag otel-helper invokes; without it, otel-helper falls back to empty
+// attribution headers on every cold start.
+func runGetMonitoringToken(profile string, cfg *config.ProfileConfig) int {
+	token, err := storage.GetMonitoringToken(profile, cfg.CredentialStorage)
+	if err != nil || token == "" {
+		debugf("no monitoring token available: %v", err)
+		return 1
+	}
+	fmt.Fprintln(os.Stdout, token)
 	return 0
 }
 

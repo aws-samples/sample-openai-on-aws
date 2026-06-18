@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,6 +152,58 @@ func TestRun_ClearCache(t *testing.T) {
 	}
 	if got := storage.LoadRefreshToken("default", "session"); got != "" {
 		t.Errorf("expected cleared refresh token, got %q", got)
+	}
+}
+
+func TestRun_GetMonitoringToken_Present(t *testing.T) {
+	resetFlags()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_OIDC_AUTH_PROFILE", "")
+
+	setupConfig(t, tmp, basicConfig)
+	if err := storage.SaveMonitoringToken("default", "session", "monitoring-token", map[string]interface{}{
+		"exp": float64(time.Now().Add(1 * time.Hour).Unix()),
+	}); err != nil {
+		t.Fatalf("save monitoring token: %v", err)
+	}
+
+	r, w, _ := os.Pipe()
+	old := os.Stdout
+	os.Stdout = w
+
+	os.Args = []string{"credential-process", "--profile", "default", "--get-monitoring-token"}
+	code := run()
+
+	w.Close()
+	os.Stdout = old
+
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+
+	buf := make([]byte, 4096)
+	n, _ := r.Read(buf)
+	if got := strings.TrimSpace(string(buf[:n])); got != "monitoring-token" {
+		t.Errorf("expected token on stdout, got %q", got)
+	}
+}
+
+func TestRun_GetMonitoringToken_Missing(t *testing.T) {
+	resetFlags()
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("AWS_PROFILE", "")
+	t.Setenv("AWS_OIDC_AUTH_PROFILE", "")
+
+	setupConfig(t, tmp, basicConfig)
+
+	os.Args = []string{"credential-process", "--profile", "default", "--get-monitoring-token"}
+	if code := run(); code != 1 {
+		t.Errorf("expected exit 1 when no monitoring token cached, got %d", code)
 	}
 }
 

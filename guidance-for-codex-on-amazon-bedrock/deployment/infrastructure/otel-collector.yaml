@@ -17,8 +17,8 @@ Parameters:
 
   MetricsNamespace:
     Type: String
-    Default: LiteLLMGateway
-    Description: CloudWatch metrics namespace
+    Default: Codex
+    Description: CloudWatch metrics namespace (must match codex-otel-dashboard.yaml MetricsNamespace)
 
   CustomDomainName:
     Type: String

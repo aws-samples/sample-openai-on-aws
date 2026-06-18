@@ -117,15 +117,18 @@ Parameters:
     Type: String
     Default: ""
     Description: >
-      Expected JWT audience claim (optional).
-      Leave empty to skip audience validation.
+      Expected JWT audience claim (optional, strongly recommended).
+      Leave empty to skip audience validation. The middleware verifies the
+      audience only when this is set.
 
   JwtIssuer:
     Type: String
     Default: ""
     Description: >
-      Expected JWT issuer claim (optional).
-      Leave empty to skip issuer validation.
+      Expected JWT issuer claim (optional, strongly recommended).
+      Leave empty to skip issuer validation. When unset, any token signed by a
+      key in the JWKS is accepted - set this to your IdP issuer URL on a shared
+      or multi-tenant JWKS.
 
   UserKeyMappingStackName:
     Type: String

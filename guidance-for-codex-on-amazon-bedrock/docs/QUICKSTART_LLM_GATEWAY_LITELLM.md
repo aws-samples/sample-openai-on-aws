@@ -329,12 +329,12 @@ curl -X GET "$GATEWAY_URL/user/info" \
 ## Monitoring
 
 If you deployed the OTel collector (Step 4), metrics flow to CloudWatch
-namespace `LiteLLMGateway` by default unless you override `MetricsNamespace` in
+namespace `Codex` by default unless you override `MetricsNamespace` in
 the collector stack:
 
 ```bash
 aws cloudwatch list-metrics \
-  --namespace LiteLLMGateway \
+  --namespace Codex \
   --region "$AWS_REGION" \
   --query 'Metrics[0:5].[MetricName]' \
   --output table
@@ -350,7 +350,7 @@ aws cloudwatch list-metrics \
 aws cloudformation deploy \
   --stack-name codex-litellm-dashboard \
   --template-file deployment/infrastructure/litellm-dashboard.yaml \
-  --parameter-overrides MetricsNamespace=LiteLLMGateway \
+  --parameter-overrides MetricsNamespace=Codex \
   --region "$AWS_REGION"
 ```
 
