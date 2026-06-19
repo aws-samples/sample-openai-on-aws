@@ -21,8 +21,8 @@ Need hard quota enforcement? (Block requests when limits hit)
 
 | Pattern | Setup Time | Telemetry | Best For |
 |---------|------------|-----------|----------|
-| **[Native AWS Access](guidance-for-codex-on-amazon-bedrock/docs/QUICKSTART_NATIVE_AWS_ACCESS.md)** | 5–60 min | Optional Codex-side OTel | Teams with IdC, soft monitoring OK |
-| **[LLM Gateway](guidance-for-codex-on-amazon-bedrock/docs/QUICKSTART_LLM_GATEWAY.md)** | 15 min | Provided by the gateway | Hard budgets, rate limiting |
+| **[Native AWS Access](https://github.com/openai-on-aws/guidance-codex/blob/main/docs/QUICKSTART_NATIVE_AWS_ACCESS.md)** | 5–60 min | Optional Codex-side OTel | Teams with IdC, soft monitoring OK |
+| **[LLM Gateway](https://github.com/openai-on-aws/guidance-codex/blob/main/docs/QUICKSTART_LLM_GATEWAY.md)** | 15 min | Provided by the gateway | Hard budgets, rate limiting |
 
 Both patterns include:
 - Corporate SSO (Okta, Azure AD, Auth0, AWS IAM Identity Center)
@@ -34,20 +34,20 @@ Both patterns include:
 ## Quick Start
 
 ```bash
-git clone https://github.com/aws-samples/sample-openai-on-aws.git
-cd sample-openai-on-aws/guidance-for-codex-on-amazon-bedrock
+git clone https://github.com/openai-on-aws/guidance-codex.git
+cd guidance-codex
 ```
 
-- **Native AWS Access** → [Quickstart](guidance-for-codex-on-amazon-bedrock/docs/QUICKSTART_NATIVE_AWS_ACCESS.md)
-- **LLM Gateway** → [Quickstart](guidance-for-codex-on-amazon-bedrock/docs/QUICKSTART_LLM_GATEWAY.md)
+- **Native AWS Access** → [Quickstart](https://github.com/openai-on-aws/guidance-codex/blob/main/docs/QUICKSTART_NATIVE_AWS_ACCESS.md)
+- **LLM Gateway** → [Quickstart](https://github.com/openai-on-aws/guidance-codex/blob/main/docs/QUICKSTART_LLM_GATEWAY.md)
 
 ## Documentation
 
-- [Overview & decision guide](guidance-for-codex-on-amazon-bedrock/QUICKSTART.md)
-- [Architecture & pattern comparison](guidance-for-codex-on-amazon-bedrock/docs/01-decide.md)
-- [Monitoring & operations](guidance-for-codex-on-amazon-bedrock/docs/operate-monitoring.md)
-- [Troubleshooting](guidance-for-codex-on-amazon-bedrock/docs/operate-troubleshooting.md)
-- [CHANGELOG](guidance-for-codex-on-amazon-bedrock/CHANGELOG.md)
+- [Overview & decision guide](https://github.com/openai-on-aws/guidance-codex/blob/main/QUICKSTART.md)
+- [Architecture & pattern comparison](https://github.com/openai-on-aws/guidance-codex/blob/main/docs/01-decide.md)
+- [Monitoring & operations](https://github.com/openai-on-aws/guidance-codex/blob/main/docs/operate-monitoring.md)
+- [Troubleshooting](https://github.com/openai-on-aws/guidance-codex/blob/main/docs/operate-troubleshooting.md)
+- [CHANGELOG](https://github.com/openai-on-aws/guidance-codex/blob/main/CHANGELOG.md)
 
 ## Source Packages
 
