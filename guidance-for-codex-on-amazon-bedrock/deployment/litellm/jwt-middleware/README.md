@@ -124,9 +124,12 @@ aws cloudformation deploy \
   --parameter-overrides \
       NetworkingStackName=codex-networking \
       LiteLLMMasterKey="$LITELLM_MASTER_KEY" \
+      DBUsername=litellm \
       DBPassword="$DB_PASSWORD" \
-      AwsRegion="$AWS_REGION" \
+      AwsRegion="$BEDROCK_REGION" \
       LiteLLMImage="$LITELLM_IMAGE" \
+      AlbCertificateArn="$ALB_CERTIFICATE_ARN" \
+      AlbDomainName="$GATEWAY_DOMAIN_NAME" \
       EnableJwtMiddleware=true \
       JwtMiddlewareImage="$JWT_IMAGE" \
       JwksUrl="https://your-tenant.okta.com/.well-known/jwks.json" \
@@ -180,9 +183,10 @@ curl https://<gateway-url>/api/my-key \
 
 export JWT_TOKEN="eyJhbGc..."
 
-curl https://<gateway-url>/v1/chat/completions \
+curl https://<gateway-url>/v1/responses \
   -H "Authorization: Bearer $JWT_TOKEN" \
-  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hi"}]}'
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-5.5","input":"Hi"}'
 
 # Middleware:
 # 1. Validates JWT
@@ -315,7 +319,7 @@ aws iam list-attached-role-policies --role-name <task-role-name>
 ## Security Considerations
 
 1. **JWT Signature Validation**: Always enabled via JWKS
-2. **HTTPS**: Use ACM certificate on ALB (not shown in basic deployment)
+2. **HTTPS**: ACM certificate on ALB is required by the ECS template
 3. **Network Security**: Restrict ALB security group to corporate network CIDR
 4. **Key Storage**: API keys stored in encrypted DynamoDB table (KMS)
 5. **Key Rotation**: Keys have 90-day TTL, auto-cleanup via DynamoDB TTL

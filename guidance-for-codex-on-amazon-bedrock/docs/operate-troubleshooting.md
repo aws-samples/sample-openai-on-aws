@@ -21,11 +21,12 @@ regardless of how you deployed.
 ### Model ID returns 404 / `ResourceNotFoundException`
 - **Likely cause:** the model ID in `~/.codex/config.toml` (or gateway
   `litellm_config.yaml`) is not available in the target region, or it is
-  only served through the mantle endpoint (GPT-5.4) and you are calling
+  only served through the mantle endpoint (GPT-5.4 / GPT-5.5) and you are calling
   standard Converse, or vice versa.
-- **Fix:** verify the model ID against the region matrix in
-  [reference-regions.md](reference-regions.md). `openai.gpt-oss-120b-1:0`
-  and similar models use standard Converse; `gpt-5.4` uses the mantle
+- **Fix:** verify the model ID against current AWS Bedrock docs and confirm it
+  appears in `aws bedrock list-foundation-models --region <region>` as
+  described in [reference-regions.md](reference-regions.md). `openai.gpt-oss-120b-1:0`
+  and similar models use standard Converse; `gpt-5.4` / `gpt-5.5` use the mantle
   endpoint.
 
 ### CloudTrail `userIdentity.principalId` shows assumed-role ARN, not SSO username
@@ -75,7 +76,7 @@ regardless of how you deployed.
   ```
   Then retry the stack delete.
 
-### Gateway `POST /v1/chat/completions` from outside the VPC times out
+### Gateway `POST /v1/responses` from outside the VPC times out
 - **Cause:** ALB `AllowedCidr` defaults to `10.0.0.0/8` — by design, the
   gateway is internal-only.
 - **Fix:** either deploy a bastion or connect through the corporate VPN, or

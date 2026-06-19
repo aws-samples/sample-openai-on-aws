@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"runtime"
 
-	"github.com/99designs/keyring"
 	"aws-oidc-auth/internal/federation"
+	"github.com/99designs/keyring"
 )
 
 const serviceName = "aws-oidc-auth"
@@ -113,6 +113,43 @@ func SaveMonitoringTokenToKeyring(data *MonitoringTokenData, profile string) err
 
 	return kr.Set(keyring.Item{
 		Key:  profile + "-monitoring",
+		Data: jsonData,
+	})
+}
+
+// ReadRefreshTokenFromKeyring reads the refresh token from keyring.
+func ReadRefreshTokenFromKeyring(profile string) (*RefreshTokenData, error) {
+	kr, err := openKeyring()
+	if err != nil {
+		return nil, err
+	}
+
+	item, err := kr.Get(profile + "-refresh")
+	if err != nil {
+		return nil, err
+	}
+
+	var data RefreshTokenData
+	if err := json.Unmarshal(item.Data, &data); err != nil {
+		return nil, err
+	}
+	return &data, nil
+}
+
+// SaveRefreshTokenToKeyring saves a refresh token to keyring.
+func SaveRefreshTokenToKeyring(data *RefreshTokenData, profile string) error {
+	kr, err := openKeyring()
+	if err != nil {
+		return err
+	}
+
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	return kr.Set(keyring.Item{
+		Key:  profile + "-refresh",
 		Data: jsonData,
 	})
 }

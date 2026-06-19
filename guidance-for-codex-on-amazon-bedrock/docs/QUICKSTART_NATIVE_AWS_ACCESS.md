@@ -130,6 +130,9 @@ GROUP_ID=$(aws identitystore list-groups \
   --region us-east-1 \
   --query 'Groups[0].GroupId' --output text)
 
+# Resolve the current account ID (used as the assignment target)
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
 aws sso-admin create-account-assignment \
   --instance-arn "$IDC_INSTANCE_ARN" \
   --permission-set-arn "$PS_ARN" \
@@ -246,7 +249,10 @@ region = us-west-2
 
 ### Codex Configuration (`~/.codex/config.toml`)
 
-Append the following block to `~/.codex/config.toml`. The Bedrock provider uses the AWS SDK credential chain, so the `profile` value must match the `[profile ...]` name in `~/.aws/config`.
+Append the following block to the user-level `~/.codex/config.toml`. Codex
+ignores provider settings in project-local `.codex/config.toml` files. The
+Bedrock provider uses the AWS SDK credential chain, so the `profile` value
+must match the `[profile ...]` name in `~/.aws/config`.
 
 ```toml
 model_provider = "amazon-bedrock"
@@ -257,7 +263,19 @@ region = "us-west-2"
 profile = "codex-bedrock"
 ```
 
+This guide keeps `openai.gpt-5.4` in the sample because the walkthrough uses
+`us-west-2`. OpenAI recommends the latest GPT-5 family model for Codex, so if
+you deploy in `us-east-2`, switch the snippet to `model = "openai.gpt-5.5"`
+and update the Bedrock region to match.
+
 For advanced Codex configuration options (model parameters, sandbox modes, custom providers), see the [OpenAI Codex configuration reference](https://developers.openai.com/codex/config-advanced).
+
+For enterprise rollout controls and Codex repo customization, use the official
+OpenAI documentation:
+- [Managed configuration (`requirements.toml`)](https://developers.openai.com/codex/enterprise/managed-configuration#admin-enforced-requirements-requirementstoml)
+- [Sandbox and approvals](https://developers.openai.com/codex/concepts/sandboxing#configure-defaults)
+- [AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)
+- [Customization](https://developers.openai.com/codex/concepts/customization#next-step)
 
 ### Authenticate and Launch
 
@@ -378,7 +396,9 @@ aws cloudformation deploy \
   --region "$AWS_REGION" \
   --parameter-overrides \
       VpcId="$VPC_ID" \
-      SubnetIds="$SUBNET_IDS"
+      SubnetIds="$SUBNET_IDS" \
+      CustomDomainName=otel.codex.example.com \
+      HostedZoneId=Z0123456789ABCDEFGHIJ
 
 # Capture the collector ALB URL
 COLLECTOR_ENDPOINT=$(aws cloudformation describe-stacks \
@@ -393,19 +413,19 @@ Append the following block. Substitute the collector endpoint captured above.
 
 ```toml
 [otel.exporter.otlp-http]
-endpoint = "http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com/v1/logs"
+endpoint = "https://otel.codex.example.com/v1/logs"
 protocol = "binary"
 
 [otel.metrics_exporter.otlp-http]
-endpoint = "http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com/v1/metrics"
+endpoint = "https://otel.codex.example.com/v1/metrics"
 protocol = "binary"
 
 [otel.trace_exporter.otlp-http]
-endpoint = "http://otel-alb-xxxxx.us-west-2.elb.amazonaws.com/v1/traces"
+endpoint = "https://otel.codex.example.com/v1/traces"
 protocol = "binary"
 ```
 
-Codex automatically exports metrics to the central collector, which forwards them to CloudWatch under the `LiteLLMGateway` namespace. View the dashboard under **CloudWatch -> Dashboards -> CodexOnBedrock** (deployed by the `codex-otel-dashboard` stack).
+Codex automatically exports metrics to the central collector, which forwards them to CloudWatch under the `Codex` namespace. View the dashboard under **CloudWatch -> Dashboards -> CodexOnBedrock** (deployed by the `codex-otel-dashboard` stack).
 
 ---
 
@@ -519,13 +539,15 @@ aws sso-admin delete-permission-set \
   --region us-east-1
 
 # 4. Admin deletes the Bedrock auth stack
-#    Note: deploy region is us-east-1 (the IdC home region), not us-west-2
+#    Note: the auth stack lives in the Bedrock region (us-west-2, the
+#    AWS_REGION used at deploy time), NOT us-east-1. us-east-1 is only the
+#    IdC home region used for the sso-admin commands above.
 aws cloudformation delete-stack \
   --stack-name codex-bedrock-idc \
-  --region us-east-1
+  --region us-west-2
 aws cloudformation wait stack-delete-complete \
   --stack-name codex-bedrock-idc \
-  --region us-east-1
+  --region us-west-2
 ```
 
 ---

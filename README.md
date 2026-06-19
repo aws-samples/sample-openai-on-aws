@@ -70,4 +70,7 @@ To report a security issue, see [CONTRIBUTING.md](CONTRIBUTING.md#security-issue
 
 ## License
 
-MIT-0 — see [LICENSE](LICENSE).
+This repository is dual-licensed:
+
+- **Code** (`.py`, `.js`, `.ts`, `.go`, configuration files, and other source) is licensed under the [MIT No Attribution (MIT-0)](LICENSE) license.
+- **Documentation, media, and text content** (`.md` documentation, images, and diagrams) is licensed under the [Creative Commons Attribution-ShareAlike 4.0 International (CC-BY-SA 4.0)](LICENSE-DOCS.md) license.

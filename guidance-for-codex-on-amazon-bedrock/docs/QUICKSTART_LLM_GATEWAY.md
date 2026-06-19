@@ -24,7 +24,7 @@ Corporate IdP (Okta/Azure) → OIDC/JWT → LLM Gateway → Amazon Bedrock
 **Key capabilities:**
 - **Hard budget enforcement** — Gateway blocks requests when user/team hits spend limit
 - **Rate limiting** — RPM (requests per minute) and TPM (tokens per minute) controls
-- **Cost attribution** — Track spend by user, team, or department for chargeback
+- **Cost attribution** — Track spend by user, team, or department for chargeback through gateway telemetry and spend logs
 - **Model routing** — Fallback logic, A/B testing, canary deployments
 - **Centralized policy** — Update quotas without touching developer machines
 
@@ -58,8 +58,10 @@ Any OpenAI-compatible gateway that integrates with Amazon Bedrock can be used wi
 Any gateway must meet these minimum requirements:
 
 ### Technical Requirements
-- ✅ **OpenAI API compatibility** — implements `/v1/chat/completions` endpoint
+- ✅ **OpenAI API compatibility** — implements `/v1/responses` for Codex and GPT-5.x workloads (optionally `/v1/chat/completions` for chat-style aliases)
+- ✅ **Responses field fidelity** — preserves Codex/OpenAI request fields such as `reasoning.effort`, `text.verbosity`, `prompt_cache_key`, `previous_response_id`, and `phase` instead of silently dropping them
 - ✅ **Bedrock integration** — can call Amazon Bedrock APIs (requires IAM role)
+- ✅ **Gateway-managed upstream auth** — if proxying Bedrock Mantle, refreshes upstream bearer tokens inside the gateway rather than depending on a manually rotated static 12-hour token
 - ✅ **Authentication** — supports API keys or JWT/OIDC tokens
 - ✅ **AWS deployment** — runs on ECS, EKS, EC2, Lambda, or hybrid
 
@@ -85,13 +87,22 @@ aws cloudformation deploy \
   --stack-name codex-networking \
   --template-file deployment/infrastructure/networking.yaml \
   --region us-west-2
-
-# 2. (Optional) Deploy OTel collector for CloudWatch metrics
-aws cloudformation deploy \
-  --stack-name codex-otel-collector \
-  --template-file deployment/infrastructure/otel-collector.yaml \
-  --region us-west-2
 ```
+
+**(Optional) Deploy the OTel collector + CloudWatch dashboard for metrics.**
+`otel-collector.yaml` creates IAM resources and requires several parameters
+(`VpcId`, `SubnetIds`, `CustomDomainName`, `HostedZoneId`). Use the helper
+script, which deploys networking + collector + dashboard with the right
+capabilities and a single consistent metrics namespace:
+
+```bash
+deployment/scripts/deploy-otel-stack.sh \
+  --region us-west-2 \
+  --custom-domain otel.codex.example.com \
+  --hosted-zone-id Z1234567890ABC
+```
+
+Run `deployment/scripts/deploy-otel-stack.sh --help` for HTTPS/JWT options.
 
 ### Phase 2: Gateway Deployment (Gateway-Specific)
 
@@ -106,19 +117,28 @@ See the gateway-specific guide for exact steps.
 
 ### Phase 3: Developer Configuration (Common)
 
-Once deployed, developers configure Codex to use the gateway. Your admin provides the gateway URL (for LiteLLM, it's the `GatewayEndpoint` output from the gateway stack):
+Once deployed, developers configure the user-level `~/.codex/config.toml` to
+use the gateway. Your admin provides the gateway URL (for LiteLLM, it's the
+`GatewayEndpoint` output from the gateway stack):
 
 ```toml
 # ~/.codex/config.toml
 model_provider = "my-gateway"
-model = "gpt-4o"  # maps to GPT-OSS Safeguard 120b via Bedrock Mantle
+model = "gpt-5.5"  # Prefer the latest GPT-5 family model your gateway exposes
 
 [model_providers.my-gateway]
 name = "My LLM Gateway"
-base_url = "http://<gateway-url>/v1"  # Replace with URL from admin
+base_url = "<gateway-endpoint>"  # Paste the exact GatewayEndpoint value from your admin, including scheme and /v1
 env_key = "OPENAI_API_KEY"
-wire_api = "chat"
+wire_api = "responses"  # Optional but explicit; custom providers default to Responses
 ```
+
+Keep gateway provider settings in user-level `~/.codex/config.toml`; Codex
+ignores `model_provider` and `model_providers` in project-local
+`.codex/config.toml` files. If your gateway exposes different aliases, swap the
+`model` string accordingly. If your gateway expects OpenAI authentication
+instead of a gateway-specific API key, use `requires_openai_auth = true`
+instead of `env_key`, per the Codex auth docs for custom providers.
 
 ```bash
 # Set API key (get from gateway admin)
@@ -129,6 +149,17 @@ codex exec "Hello world"
 ```
 
 For advanced configuration, see [OpenAI Codex documentation](https://developers.openai.com/codex/config-advanced).
+
+On this path, Bedrock CloudTrail and CUR attribute requests to the gateway IAM
+role. For per-user or per-team reporting, rely on the gateway's own telemetry
+and spend logs.
+
+For enterprise rollout controls and Codex repo customization, use the official
+OpenAI documentation:
+- [Managed configuration (`requirements.toml`)](https://developers.openai.com/codex/enterprise/managed-configuration#admin-enforced-requirements-requirementstoml)
+- [Sandbox and approvals](https://developers.openai.com/codex/concepts/sandboxing#configure-defaults)
+- [AGENTS.md guide](https://developers.openai.com/codex/guides/agents-md)
+- [Customization](https://developers.openai.com/codex/concepts/customization#next-step)
 
 ---
 

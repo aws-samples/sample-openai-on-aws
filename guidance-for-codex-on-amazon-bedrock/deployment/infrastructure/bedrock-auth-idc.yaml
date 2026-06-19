@@ -64,12 +64,18 @@ Resources:
           - Sid: MantleInference
             Effect: Allow
             Action:
+              # GPT-5.x via the Mantle OpenAI-compatible Responses endpoint
+              # (bedrock-mantle.<region>.api.aws) requires BOTH the bearer-token
+              # auth action and the inference action, verified against the live
+              # API: CallWithBearerToken authenticates the request, then
+              # CreateInference runs it against project/default.
+              - bedrock-mantle:CallWithBearerToken
               - bedrock-mantle:CreateInference
               - bedrock-mantle:GetInference
+            # NOTE: these calls do not populate aws:RequestedRegion, so a region
+            # condition here causes an implicit deny. Region is instead bounded
+            # by the regional Mantle endpoint the bearer token targets.
             Resource: '*'
-            Condition:
-              StringEquals:
-                aws:RequestedRegion: !Ref AllowedBedrockRegions
           - Sid: ListBedrockResources
             Effect: Allow
             Action:

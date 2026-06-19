@@ -1,16 +1,21 @@
 services:
   litellm:
-    image: ghcr.io/berriai/litellm:main-latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: codex-litellm:local
     ports:
       - "4000:4000"
     volumes:
       - ./litellm_config.yaml:/app/config.yaml:ro
-    # Use the EC2 instance metadata endpoint for AWS credentials.
-    # The container inherits the host's IAM role — no static keys needed.
-    extra_hosts:
-      - "169.254.169.254:169.254.169.254"
     environment:
       AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+      BEDROCK_MANTLE_REGION: ${BEDROCK_MANTLE_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      BEDROCK_TOKEN_REFRESH_INTERVAL_SECONDS: ${BEDROCK_TOKEN_REFRESH_INTERVAL_SECONDS:-300}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       DATABASE_URL: ${DATABASE_URL:-postgresql://litellm:litellm@db:5432/litellm}
       OTEL_EXPORTER: ${OTEL_EXPORTER:-otlp_http}

@@ -11,7 +11,7 @@ resulting profile through the standard AWS SDK credential chain.
   Okta, Ping, JumpCloud, Google Workspace, CyberArk, OneLogin.
 - Admin access in both the AWS management account and the corporate IdP.
 - AWS CLI v2 distributable to end users via winget / MSI / Homebrew / MDM.
-- Bedrock activated in the target region(s). See [reference-regions.md](reference-regions.md) for the current model × region matrix.
+- Bedrock activated in the target region(s). See [reference-regions.md](reference-regions.md) for how to verify current model availability in AWS.
 
 ## Admin setup (one-time)
 
@@ -117,7 +117,7 @@ sso_role_name = CodexBedrockUser
 region = us-west-2
 ```
 
-**Codex configuration** — append to `~/.codex/config.toml`:
+**Codex configuration** — append to the user-level `~/.codex/config.toml`:
 
 ```toml
 model_provider = "amazon-bedrock"
@@ -130,6 +130,12 @@ name = "Amazon Bedrock"
 region = "us-west-2"
 profile = "codex"
 ```
+
+Keep provider settings in user-level `~/.codex/config.toml`; Codex ignores
+`model_provider` and `model_providers` in project-local `.codex/config.toml`
+files. This sample keeps `openai.gpt-5.4` so the `us-west-2` walkthrough works
+end to end. If you standardize on `us-east-2`, prefer `openai.gpt-5.5` to
+follow OpenAI's latest-model guidance for Codex.
 
 For advanced Codex configuration (model parameters, sandbox modes, custom
 providers), see the
@@ -237,7 +243,10 @@ CloudWatch `user.id` dimension.
 ### 1. Deploy the collector stack
 
 ```bash
-deployment/scripts/deploy-otel-stack.sh --region us-west-2
+deployment/scripts/deploy-otel-stack.sh \
+  --region us-west-2 \
+  --custom-domain otel.codex.example.com \
+  --hosted-zone-id Z0123456789ABCDEFGHIJ
 ```
 
 The script deploys three stacks in order (`codex-otel-networking`,
@@ -250,14 +259,16 @@ Useful flags:
 |---|---|
 | `--region` | Target region (default `us-west-2`). |
 | `--stack-prefix` | Rename the three stacks (default `codex-otel`). |
+| `--custom-domain` | Required HTTPS endpoint domain for the collector. |
+| `--hosted-zone-id` | Required Route 53 zone ID for certificate DNS validation. |
 | `--dashboard-name` | CloudWatch dashboard name (default `CodexOnBedrock`). |
 | `--input-price` / `--output-price` / `--cached-input-price` | Per-1M-token USD for the dashboard's spend-estimate widgets. Defaults are placeholders — update after GPT-5.4 pricing publishes. |
 
-### 2. Harden the collector (opt-in — recommended before production use)
+### 2. Add JWT validation (optional production hardening)
 
-The default posture is HTTP-only: the collector accepts any `x-user-id` value
-(trust-on-distribution). For production, pass all five flags below together
-to enable HTTPS and ALB JWT validation:
+The collector is HTTPS-only. Without JWT validation it still accepts any
+`x-user-id` value (trust-on-distribution). For stronger attribution, pass the
+OIDC flags below to enable ALB JWT validation:
 
 ```bash
 deployment/scripts/deploy-otel-stack.sh \
@@ -274,7 +285,7 @@ include it as an additional static header alongside `x-user-id` in the
 `[otel.headers]` block shown below. Per-user token distribution is out of
 scope for this document.
 
-**Trade-offs:** HTTP-only (trust-on-distribution) is faster to deploy but accepts any `x-user-id` value. JWT validation (HTTPS + ALB auth) verifies tokens but requires ACM certificate and OIDC issuer configuration.
+**Trade-offs:** HTTPS without JWT is simpler but accepts any `x-user-id` value. JWT validation verifies tokens but requires OIDC issuer configuration and developer token distribution.
 
 ### 3. Add the OTel block to the developer config
 

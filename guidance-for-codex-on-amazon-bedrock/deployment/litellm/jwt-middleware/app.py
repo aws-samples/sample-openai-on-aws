@@ -50,6 +50,23 @@ missing_vars = [k for k, v in required_vars.items() if not v]
 if missing_vars:
     raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
+# Issuer and audience verification are optional (mirroring LiteLLM's own
+# native JWT auth, where JWT_AUDIENCE is optional and there is no dedicated
+# issuer check). They are STRONGLY recommended: without them, any token signed
+# by a key in the JWKS authenticates and mints a LiteLLM key. This is a real
+# risk on a shared / multi-tenant JWKS. Warn loudly when either is unset.
+if not JWT_ISSUER:
+    logger.warning(
+        "JWT_ISSUER is not set - issuer (iss) claim will NOT be verified. "
+        "Any token signed by a key in the JWKS will be accepted. "
+        "Set JWT_ISSUER to your IdP's issuer URL to close this gap."
+    )
+if not JWT_AUDIENCE:
+    logger.warning(
+        "JWT_AUDIENCE is not set - audience (aud) claim will NOT be verified. "
+        "Set JWT_AUDIENCE to the audience your IdP issues tokens for."
+    )
+
 # In-memory caches
 jwks_cache = TTLCache(maxsize=1, ttl=3600)  # Cache JWKS for 1 hour
 user_key_cache = TTLCache(maxsize=1000, ttl=1800)  # Cache user keys for 30 minutes
@@ -65,7 +82,9 @@ retry = Retry(
     backoff_factor=0.5,
     status_forcelist=[500, 502, 503, 504],
 )
-session.mount('http://', HTTPAdapter(max_retries=retry))
+# HTTP adapter mounted for the co-located LiteLLM sidecar (LITELLM_URL, default http://localhost:4000).
+# All external calls (JWKS_URL) use HTTPS. Do not use this session for non-localhost HTTP endpoints.
+session.mount('http://', HTTPAdapter(max_retries=retry))  # nosec # nosemgrep: python.lang.security.audit.insecure-transport.requests.request-session-with-http
 session.mount('https://', HTTPAdapter(max_retries=retry))
 
 
@@ -84,7 +103,7 @@ def get_jwks():
             return response.json()
         return None
     except Exception as e:
-        logger.error(f"Failed to fetch JWKS: {e}")
+        logger.warning(f"Failed to fetch JWKS: {e}")
         raise
 
 
@@ -119,6 +138,10 @@ def validate_jwt_token(token: str) -> Dict:
                 raise ValueError(f"Key with kid '{kid}' not found in JWKS")
 
             # Decode and validate token
+            # Signature and expiry are always verified. Audience and issuer are
+            # verified only when configured (see the startup warnings above);
+            # this mirrors LiteLLM's own native JWT auth, where JWT_AUDIENCE is
+            # optional. Setting both is strongly recommended.
             payload = jwt.decode(
                 token,
                 key=jwt.algorithms.RSAAlgorithm.from_jwk(json.dumps(key)),
@@ -424,4 +447,4 @@ if __name__ == '__main__':
     logger.info(f"JWKS URL: {JWKS_URL}")
     logger.info(f"DynamoDB Table: {DYNAMODB_TABLE}")
 
-    app.run(host='0.0.0.0', port=8080, debug=False)
+    app.run(host='0.0.0.0', port=8080, debug=False)  # nosec B104 # nosemgrep: python.flask.security.audit.avoid_app_run_with_bad_host

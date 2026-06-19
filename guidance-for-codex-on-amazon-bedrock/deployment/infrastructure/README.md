@@ -153,9 +153,9 @@ Outputs (all exported): `VpcId`, `PublicSubnet1`, `PublicSubnet2`,
 | `VpcId`              | String             | —                                                | Required. Pass via `!ImportValue` from the networking stack. |
 | `SubnetIds`          | CommaDelimitedList | —                                                | At least 2 subnets (ALB requirement). |
 | `CollectorImage`     | String             | `public.ecr.aws/aws-observability/aws-otel-collector:latest` | ADOT image. |
-| `MetricsNamespace`   | String             | `LiteLLMGateway`                                 | CloudWatch metrics namespace. |
-| `CustomDomainName`   | String             | `''`                                             | Empty → ALB DNS over HTTP. Provide a domain to enable HTTPS. |
-| `HostedZoneId`       | String             | `''`                                             | Required when `CustomDomainName` is set. |
+| `MetricsNamespace`   | String             | `Codex`                                          | CloudWatch metrics namespace. Must match `codex-otel-dashboard.yaml`. |
+| `CustomDomainName`   | String             | —                                                | Required. HTTPS endpoint domain. |
+| `HostedZoneId`       | String             | —                                                | Required. Route53 zone for certificate validation. |
 | `OidcIssuerUrl`      | String             | `''`                                             | Optional: enable ALB JWT validation. |
 | `OidcJwksEndpoint`   | String             | `''`                                             | JWKS URL for ALB JWT signature validation. |
 | `OidcClientId`       | String             | `''`                                             | OIDC client ID for `aud` claim validation. |
@@ -173,10 +173,13 @@ Outputs: `VpcId`, `SubnetIds`, `CollectorEndpoint` (exported as
 | `OtelStackName`            | String  | `codex-test-otel-collector`| Imports `<name>-endpoint` only when `EnableOtel=true`. |
 | `EnableOtel`               | String  | `false`                    | Set to `true` only after deploying an OTel collector. |
 | `LiteLLMMasterKey`         | String  | —                          | `NoEcho`. Stored in Secrets Manager. |
+| `DBUsername`               | String  | —                          | `NoEcho`. RDS PostgreSQL username. |
 | `DBPassword`               | String  | —                          | `NoEcho`. RDS PostgreSQL password. |
-| `AwsRegion`                | String  | `us-east-1`                | Bedrock region for upstream calls. |
+| `AwsRegion`                | String  | `us-east-2`                | Bedrock region for upstream calls. Use `us-east-2` for the default GPT-5.4 / GPT-5.5 Mantle setup. |
 | `LiteLLMImage`             | String  | —                          | Required. Fully-qualified ECR URI. |
 | `AllowedCidr`              | String  | `10.0.0.0/8`               | ALB ingress CIDR. **Never** `0.0.0.0/0`. |
+| `AlbCertificateArn`        | String  | —                          | Required ACM certificate ARN for HTTPS listener. |
+| `AlbDomainName`            | String  | `''`                       | Optional DNS name matching `AlbCertificateArn`; used in endpoint output. |
 | `EnableJwtMiddleware`      | String  | `false`                    | `true` swaps API-key auth for OIDC JWT validation. |
 | `JwtMiddlewareImage`       | String  | `''`                       | Required when `EnableJwtMiddleware=true`. |
 | `JwksUrl`                  | String  | `''`                       | IdP JWKS endpoint. |
@@ -235,6 +238,8 @@ aws cloudformation deploy \
       SubnetIds=$(aws cloudformation list-exports \
                 --query "Exports[?Name=='codex-networking-SubnetIds'].Value" \
                 --output text) \
+      CustomDomainName=telemetry.example.com \
+      HostedZoneId=Z1234567890ABC \
       MetricsNamespace=CodexGateway
 
 # 3) LiteLLM gateway on ECS Fargate
@@ -249,11 +254,14 @@ aws cloudformation deploy \
       LiteLLMMasterKey=$(aws secretsmanager get-random-password \
                             --exclude-punctuation --password-length 40 \
                             --query RandomPassword --output text) \
+      DBUsername=litellm \
       DBPassword=$(aws secretsmanager get-random-password \
                       --exclude-punctuation --password-length 32 \
                       --query RandomPassword --output text) \
       AwsRegion=us-east-1 \
       LiteLLMImage=<account>.dkr.ecr.<region>.amazonaws.com/codex-litellm:latest \
+      AlbCertificateArn=arn:aws:acm:<region>:<account>:certificate/<id> \
+      AlbDomainName=litellm.example.com \
       AllowedCidr=10.0.0.0/8
 
 # 4) (Optional) Gateway dashboard

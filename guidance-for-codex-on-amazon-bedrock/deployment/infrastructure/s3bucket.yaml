@@ -5,6 +5,19 @@ Resources:
   # S3 Bucket for CloudFormation artifacts (Lambda code packages)
   CfnArtifactsBucket:
     Type: AWS::S3::Bucket
+    Metadata:
+      checkov:
+        skip:
+          - id: CKV_AWS_18
+            comment: >-
+              Accepted risk: Artifacts bucket logs to itself; a dedicated cross-stack
+              logging bucket is not deployed with this stack.
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: >-
+              Accepted risk: Artifacts bucket logs to itself; a dedicated cross-stack
+              logging bucket is not deployed with this stack.
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -12,6 +25,20 @@ Resources:
               SSEAlgorithm: AES256
       VersioningConfiguration:
         Status: Enabled
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: GOVERNANCE
+            Days: 1
+      AccessControl: Private
+      # NOTE: This bucket logs access to itself (access-logs/ prefix). For production use,
+      # consider deploying a dedicated logging bucket to achieve tamper-evident, separation-of-
+      # concerns logging. Self-logging provides basic audit visibility but a malicious actor
+      # with bucket access could delete both the data and its access logs simultaneously.
+      LoggingConfiguration:
+        LogFilePrefix: access-logs/
       LifecycleConfiguration:
         Rules:
           - Id: DeleteOldVersions

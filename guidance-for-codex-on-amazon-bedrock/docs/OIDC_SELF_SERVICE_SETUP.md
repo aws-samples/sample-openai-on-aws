@@ -24,9 +24,9 @@ LiteLLM Gateway → Bedrock
 
 The canonical end-to-end deployment is in
 [QUICKSTART_LLM_GATEWAY.md](QUICKSTART_LLM_GATEWAY.md). The OIDC-specific
-steps below extract the JWT middleware path. Set `AWS_REGION` and the ECR
-registry variables (`ECR_REGISTRY`, `LITELLM_IMAGE`, `JWT_IMAGE`) once at the
-top of your shell session as shown in that guide.
+steps below extract the JWT middleware path. Set `AWS_REGION`, `BEDROCK_REGION`,
+and the ECR registry variables (`ECR_REGISTRY`, `LITELLM_IMAGE`, `JWT_IMAGE`)
+once at the top of your shell session as shown in that guide.
 
 **Step 1: Gather your IdP details**
 
@@ -93,9 +93,12 @@ aws cloudformation deploy \
   --parameter-overrides \
       NetworkingStackName=codex-networking \
       LiteLLMMasterKey="$LITELLM_MASTER_KEY" \
+      DBUsername=litellm \
       DBPassword="$DB_PASSWORD" \
-      AwsRegion="$AWS_REGION" \
+      AwsRegion="$BEDROCK_REGION" \
       LiteLLMImage="$LITELLM_IMAGE" \
+      AlbCertificateArn="$ALB_CERTIFICATE_ARN" \
+      AlbDomainName="$GATEWAY_DOMAIN_NAME" \
       EnableJwtMiddleware=true \
       JwtMiddlewareImage="$JWT_IMAGE" \
       JwksUrl="https://your-tenant.okta.com/.well-known/jwks.json" \
@@ -142,7 +145,7 @@ curl https://<gateway-url>/api/my-key \
 
 # Response:
 # {
-#   "api_key": "sk-litellm-xxxxxxxxxxxxx",
+#   "api_key": "sk-litellm-xxxxxxxxxxxxx",  # gitleaks:allow
 #   "user_id": "user@company.com",
 #   "email": "user@company.com"
 # }
@@ -154,14 +157,14 @@ curl https://<gateway-url>/api/my-key \
 # Developers can use JWT tokens directly for API calls
 # (middleware auto-creates key on first request)
 
-export JWT_TOKEN="eyJhbGc..."
+export JWT_TOKEN="eyJhbGc..."  # gitleaks:allow  # nosemgrep: generic.secrets.gitleaks.generic-api-key
 
-curl https://<gateway-url>/v1/chat/completions \
+curl https://<gateway-url>/v1/responses \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o",
-    "messages": [{"role": "user", "content": "Hello!"}]
+    "model": "gpt-5.5",
+    "input": "Hello!"
   }'
 
 # Middleware automatically:
@@ -180,11 +183,11 @@ curl https://<gateway-url>/v1/chat/completions \
 
 ```bash
 # Set for current shell
-export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx
+export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx  # gitleaks:allow
 
 # Add to shell profile for persistence:
-echo 'export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx' >> ~/.zshrc  # macOS
-echo 'export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx' >> ~/.bashrc # Linux
+echo 'export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx  # gitleaks:allow' >> ~/.zshrc  # macOS
+echo 'export OPENAI_API_KEY=sk-litellm-xxxxxxxxxxxxx  # gitleaks:allow' >> ~/.bashrc # Linux
 
 # Restart your shell or source the profile
 source ~/.zshrc  # macOS

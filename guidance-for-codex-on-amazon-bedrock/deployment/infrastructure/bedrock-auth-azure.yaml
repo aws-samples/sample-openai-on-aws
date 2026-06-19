@@ -53,10 +53,8 @@ Conditions:
   UseDirectIAM: !Equals [!Ref FederationType, direct]
   UseCognitoIdentity: !Equals [!Ref FederationType, cognito]
   MonitoringEnabled: !Equals [!Ref EnableMonitoring, 'true']
-  # Partition-aware conditions for Cognito Identity service principals
   IsGovCloudWest: !Equals [!Ref 'AWS::Region', 'us-gov-west-1']
   IsGovCloudEast: !Equals [!Ref 'AWS::Region', 'us-gov-east-1']
-  IsGovCloud: !Or [!Condition IsGovCloudWest, !Condition IsGovCloudEast]
 
 Resources:
   # ===============================================
@@ -94,10 +92,6 @@ Resources:
             Action:
               - 'bedrock:InvokeModel'
               - 'bedrock:InvokeModelWithResponseStream'
-              - 'bedrock-runtime:InvokeModel'
-              - 'bedrock-runtime:InvokeModelWithResponseStream'
-              - 'bedrock-runtime:ConverseStream'
-              - 'bedrock-runtime:Converse'
             Resource:
               - !Sub 'arn:${AWS::Partition}:bedrock:*::foundation-model/*'
               - !Sub 'arn:${AWS::Partition}:bedrock:*:*:inference-profile/*'
@@ -109,10 +103,6 @@ Resources:
             Action:
               - 'bedrock:InvokeModel'
               - 'bedrock:InvokeModelWithResponseStream'
-              - 'bedrock-runtime:InvokeModel'
-              - 'bedrock-runtime:InvokeModelWithResponseStream'
-              - 'bedrock-runtime:ConverseStream'
-              - 'bedrock-runtime:Converse'
             Resource:
               - !Sub 'arn:${AWS::Partition}:bedrock:::foundation-model/*'
           - Sid: AllowBedrockListRegional
@@ -274,19 +264,25 @@ Resources:
                     - IsGovCloudEast
                     - 'cognito-identity.us-gov-east-1.amazonaws.com:amr': unauthenticated
                     - 'cognito-identity.amazonaws.com:amr': unauthenticated
-      Policies:
-        - PolicyName: DenyAll
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Deny
-                Action: '*'
-                Resource: '*'
+      ManagedPolicyArns:
+        - !Ref DenyAllPolicy
       Tags:
         - Key: Purpose
           Value: Codex Cognito Unauthenticated Role
         - Key: Provider
           Value: Azure
+
+  DenyAllPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Condition: UseCognitoIdentity
+    Properties:
+      Description: Deny all actions for unauthenticated Cognito Identity Pool users
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Deny
+            Action: '*'
+            Resource: '*'
 
   CognitoIdentityPoolRoleAttachment:
     Type: AWS::Cognito::IdentityPoolRoleAttachment
@@ -315,11 +311,49 @@ Resources:
   # Optional Monitoring Resources
   # ===============================================
 
+  BedrockAccessLogsKmsKey:
+    Type: AWS::KMS::Key
+    Condition: MonitoringEnabled
+    Properties:
+      Description: !Sub "${AWS::StackName} Bedrock access logs key"
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableIAMPermissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: AllowCloudWatchLogs
+            Effect: Allow
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.${AWS::URLSuffix}'
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:Describe*
+            Resource: '*'
+            Condition:
+              ArnLike:
+                kms:EncryptionContext:aws:logs:arn: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+
+  BedrockAccessLogsKmsAlias:
+    Type: AWS::KMS::Alias
+    Condition: MonitoringEnabled
+    Properties:
+      AliasName: !Sub 'alias/${AWS::StackName}-bedrock-access-logs'
+      TargetKeyId: !Ref BedrockAccessLogsKmsKey
+
   BedrockAccessLogGroup:
     Type: AWS::Logs::LogGroup
     Condition: MonitoringEnabled
     Properties:
       LogGroupName: !Sub '/aws/bedrock/codex-${AWS::StackName}'
+      KmsKeyId: !GetAtt BedrockAccessLogsKmsKey.Arn
       RetentionInDays: 30
 
 Outputs:
