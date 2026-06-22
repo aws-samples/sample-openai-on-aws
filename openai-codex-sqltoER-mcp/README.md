@@ -25,17 +25,42 @@ Important:
 - if you already have a dev/test database, you usually do not need the CloudFormation stack
 - if you do use the CloudFormation stack, you must explicitly provide your own
   desktop public `/24` egress CIDR at deploy time
+- run the shell examples from this project directory unless a command says
+  otherwise, because the examples use relative paths and `$(pwd)`
+- the deploy script defaults to AWS profile `mcp` and region `us-west-2`; set
+  `AWS_PROFILE_NAME` and `AWS_REGION_NAME` when you want to use a different
+  profile or region
 - the local MCP server requires `MYSQL_ER_SSL_CA` and refuses unverified TLS
   connections
+
+## Prerequisites
+
+Before using the CloudFormation test stack or the local MCP server, make sure
+these tools are available:
+
+- AWS CLI configured with a profile that can create CloudFormation, Aurora,
+  Lambda, Secrets Manager, VPC, IAM, and CloudWatch Logs resources
+- Python 3
+- `uvx`
+
+Install `uv` if needed so `uvx` is available:
+
+```sh
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows PowerShell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
 
 ## Why This Project Exists
 
 Backend and database developers often need a fast answer to questions like:
 
-- what tables exist in this database right now
-- how are they related
-- what foreign keys connect one part of the schema to another
-- what changed since the last time I looked
+- what tables exist in this database right now?
+- how are they related?
+- what foreign keys connect one part of the schema to another?
+- what changed since the last time I looked?
 
 This project is designed to reduce that friction. The CloudFormation stack
 creates a safe dev/test environment and a tightly scoped read-only database
@@ -48,7 +73,8 @@ broad database permissions.
 - `cloudformation/aurora-mysql-test-db.yaml`: Aurora MySQL stack with a
   Lambda-backed custom resource that bootstraps a read-only user and test tables.
 - `cloudformation/deploy-aurora-mysql-test-db.sh`: helper script to deploy or
-  delete the stack using the `mcp` AWS profile.
+  delete the stack. By default it uses the `mcp` AWS profile and `us-west-2`
+  region, and both can be overridden with environment variables.
 - `mcp/mysql-er-diagram`: local MCP server package that reads
   `INFORMATION_SCHEMA` and writes Mermaid or Markdown ER diagrams.
 - `er-diagrams/`: generated local diagram output.
@@ -82,30 +108,45 @@ If you already have a dev/test database, skip to
 [Codex App MCP Configuration](#codex-app-mcp-configuration), set the required
 environment values, and point Codex at your existing database.
 
+Start from this project directory:
+
+```sh
+cd /path/to/openai-codex-sqltoER-mcp
+```
+
 If you need a disposable database for testing this project, deploy the Aurora
-test stack:
+test stack. The script defaults to profile `mcp` and region `us-west-2`:
 
 ```sh
-cloudformation/deploy-aurora-mysql-test-db.sh
+bash cloudformation/deploy-aurora-mysql-test-db.sh
 ```
 
-Delete it later:
+To use a different AWS profile or region, override the script defaults:
 
 ```sh
-cloudformation/deploy-aurora-mysql-test-db.sh --delete
+AWS_PROFILE_NAME=your-profile \
+AWS_REGION_NAME=us-west-2 \
+STACK_NAME=sql-to-erdiag-codex \
+bash cloudformation/deploy-aurora-mysql-test-db.sh
 ```
 
-Install `uv` if needed so `uvx` is available:
+Delete the stack later with the same profile, region, and stack name:
 
 ```sh
-# macOS / Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Windows PowerShell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+AWS_PROFILE_NAME=your-profile \
+AWS_REGION_NAME=us-west-2 \
+STACK_NAME=sql-to-erdiag-codex \
+bash cloudformation/deploy-aurora-mysql-test-db.sh --delete
 ```
 
-Generate an ER diagram locally:
+Keep the same network, VPN, or hotspot between stack deployment and ER diagram
+generation. The stack allows MySQL access only from the public `/24` egress
+pool detected during deployment. If your public egress IP changes, the MCP
+server may time out while connecting to Aurora; rerun the deploy command with
+the same stack name to refresh the allowed CIDR.
+
+Generate an ER diagram locally. Set `AWS_PROFILE` to the same profile you used
+for deployment; for the default deploy script, this is `mcp`.
 
 ```sh
 export MYSQL_ER_MCP_DIR="$(pwd)/mcp/mysql-er-diagram"
@@ -167,20 +208,30 @@ cloudformation/aurora-mysql-test-db.yaml
 
 The deploy script:
 
-- uses the `mcp` profile from `~/.aws/credentials`
+- uses the `mcp` profile from `~/.aws/credentials` by default
+- uses `us-west-2` by default
 - derives default VPC public subnet inputs
 - computes your public desktop egress pool from `https://checkip.amazonaws.com`
 - publishes the PyMySQL Lambda layer
 - deploys the stack in one command
 
+Default deployment:
+
+```sh
+bash cloudformation/deploy-aurora-mysql-test-db.sh
+```
+
 Optional overrides:
 
 ```sh
-AWS_PROFILE_NAME=mcp \
+AWS_PROFILE_NAME=your-profile \
 AWS_REGION_NAME=us-west-2 \
 STACK_NAME=sql-to-erdiag-codex \
-cloudformation/deploy-aurora-mysql-test-db.sh
+bash cloudformation/deploy-aurora-mysql-test-db.sh
 ```
+
+If the script is marked executable in your checkout, you can run it directly as
+`cloudformation/deploy-aurora-mysql-test-db.sh`. Using `bash` works either way.
 
 ## Public Access Model
 
@@ -190,14 +241,21 @@ the database security group allows inbound MySQL only from:
 - the custom resource Lambda security group
 - the configured desktop `/24` egress pool
 
-Refresh the CIDR before deployment if your ISP egress changes:
+The deploy script computes this CIDR from your current public egress IP each
+time it runs:
 
 ```sh
-export DESKTOP_EGRESS_POOL_CIDR="$(curl -fsS https://checkip.amazonaws.com | awk -F. '{print $1 "." $2 "." $3 ".0/24"}')"
+curl -fsS https://checkip.amazonaws.com | awk -F. '{print $1 "." $2 "." $3 ".0/24"}'
 ```
 
 For safety, the CloudFormation template does not include a real default for
-`DesktopEgressPoolCidr`. You must provide an explicit value at deployment time.
+`DesktopEgressPoolCidr`. If you deploy the template directly instead of using
+the helper script, you must provide an explicit value at deployment time.
+
+If ER diagram generation fails with a MySQL connection timeout, check whether
+your network, VPN, or hotspot changed after deployment. Rerunning the deploy
+script with the same stack name updates the configured desktop `/24` egress
+pool.
 
 ## Observability
 
