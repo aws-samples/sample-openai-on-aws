@@ -1,6 +1,6 @@
 # MySQL ER Diagram - workshop
 
-Generated: `2026-06-15T18:48:02.550215+00:00`
+Generated: `2026-06-22T20:38:53.385881+00:00`
 
 Scope: schema metadata only from `INFORMATION_SCHEMA`. No table row data is queried or written.
 
