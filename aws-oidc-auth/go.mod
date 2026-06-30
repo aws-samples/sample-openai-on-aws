@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.12
 	github.com/aws/aws-sdk-go-v2/service/cognitoidentity v1.33.21
 	github.com/aws/aws-sdk-go-v2/service/sso v1.31.4
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.17
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.36.7
 	github.com/aws/aws-sdk-go-v2/service/sts v1.43.4
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	golang.org/x/term v0.44.0
