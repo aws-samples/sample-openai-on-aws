@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /aws-oidc-auth
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: gomod
+    directory: /otel-helper
+    schedule:
+      interval: weekly
