@@ -1,5 +1,7 @@
 # Archive
 
+> **This directory is archived and not maintained.** Code here is preserved for historical reference only — it receives no bug fixes, security patches, or updates. Do not use it as a basis for new work.
+
 This folder contains older exploratory notebooks and examples that predate the main guidance. They are preserved for reference but are not actively maintained.
 
 | Folder | Contents |
