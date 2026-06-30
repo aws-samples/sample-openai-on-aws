@@ -1,6 +1,6 @@
 module aws-oidc-auth
 
-go 1.24
+go 1.25.0
 
 require (
 	github.com/99designs/keyring v1.2.2
@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.17
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.9
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
-	golang.org/x/term v0.3.0
+	golang.org/x/term v0.44.0
 	gopkg.in/ini.v1 v1.67.1
 )
 
@@ -31,5 +31,5 @@ require (
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
 	github.com/gsterjov/go-libsecret v0.0.0-20161001094733-a6f4afe4910c // indirect
 	github.com/mtibben/percent v0.2.1 // indirect
-	golang.org/x/sys v0.3.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
 )
