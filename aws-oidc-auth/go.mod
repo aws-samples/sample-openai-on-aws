@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/cognitoidentity v1.33.21
 	github.com/aws/aws-sdk-go-v2/service/sso v1.31.4
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.17
-	github.com/aws/aws-sdk-go-v2/service/sts v1.41.9
+	github.com/aws/aws-sdk-go-v2/service/sts v1.43.4
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c
 	golang.org/x/term v0.44.0
 	gopkg.in/ini.v1 v1.67.1
@@ -22,8 +22,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.29 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.29 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.6 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.7 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.20 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.30 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.12 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.29 // indirect
 	github.com/aws/aws-sdk-go-v2/service/signin v1.0.8 // indirect
 	github.com/aws/smithy-go v1.27.1 // indirect
 	github.com/danieljoos/wincred v1.1.2 // indirect
