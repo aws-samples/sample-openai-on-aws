@@ -131,7 +131,7 @@ The binary reads `config.json` from the same directory as the binary, or from `~
 | `federation_type` | `sso`, `direct` (STS), or `cognito` (Identity Pool). Auto-detected if omitted. |
 | `provider_domain` | OIDC provider domain (not needed for SSO) |
 | `client_id` | OAuth2 client ID (not needed for SSO) |
-| `provider_type` | `okta`, `auth0`, `azure`, `cognito`, or `auto` (detect from domain) |
+| `provider_type` | `okta`, `auth0`, `azure`, `cognito`, or `auto` (detect from known domains; unknown domains must be set explicitly) |
 | `aws_region` | AWS region for STS/Cognito/SSO calls |
 | `credential_storage` | `session` (file) or `keyring` (OS secure storage) |
 | `sso_start_url` | AWS SSO start URL (SSO mode) |

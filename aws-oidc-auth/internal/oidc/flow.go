@@ -14,8 +14,9 @@ import (
 
 // AuthResult holds the result of a successful OIDC authentication.
 type AuthResult struct {
-	IDToken     string
-	TokenClaims jwt.Claims
+	IDToken      string
+	RefreshToken string
+	TokenClaims  jwt.Claims
 }
 
 // AuthOptions configures the OIDC authentication flow.
@@ -71,13 +72,13 @@ func AuthenticateWithOpts(opts *AuthOptions) (*AuthResult, error) {
 	// Build authorization URL
 	params := url.Values{
 		"client_id":             {opts.ClientID},
-		"response_type":        {provCfg.ResponseType},
-		"scope":                {provCfg.Scopes},
-		"redirect_uri":         {redirectURI},
-		"state":                {state},
-		"nonce":                {nonce},
+		"response_type":         {provCfg.ResponseType},
+		"scope":                 {provCfg.Scopes},
+		"redirect_uri":          {redirectURI},
+		"state":                 {state},
+		"nonce":                 {nonce},
 		"code_challenge_method": {"S256"},
-		"code_challenge":       {pkce.CodeChallenge},
+		"code_challenge":        {pkce.CodeChallenge},
 	}
 	if opts.ProviderType == "azure" {
 		params.Set("response_mode", "query")
@@ -124,7 +125,8 @@ func AuthenticateWithOpts(opts *AuthOptions) (*AuthResult, error) {
 	}
 
 	return &AuthResult{
-		IDToken:     tokenResp.IDToken,
-		TokenClaims: claims,
+		IDToken:      tokenResp.IDToken,
+		RefreshToken: tokenResp.RefreshToken,
+		TokenClaims:  claims,
 	}, nil
 }

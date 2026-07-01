@@ -62,12 +62,17 @@ func SaveMonitoringToken(profile, storageType, idToken string, claims map[string
 	return saveMonitoringTokenToFile(data, profile)
 }
 
-func readMonitoringTokenFromFile(profile string) (*MonitoringTokenData, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
+// ClearMonitoringToken replaces any cached monitoring token with an empty, expired value.
+func ClearMonitoringToken(profile, storageType string) error {
+	data := &MonitoringTokenData{Profile: profile}
+	if storageType == "keyring" {
+		return SaveMonitoringTokenToKeyring(data, profile)
 	}
-	path := filepath.Join(home, ".aws-oidc-session", profile+"-monitoring.json")
+	return saveMonitoringTokenToFile(data, profile)
+}
+
+func readMonitoringTokenFromFile(profile string) (*MonitoringTokenData, error) {
+	path := filepath.Join(sessionDir(), profile+"-monitoring.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -80,11 +85,7 @@ func readMonitoringTokenFromFile(profile string) (*MonitoringTokenData, error) {
 }
 
 func saveMonitoringTokenToFile(data *MonitoringTokenData, profile string) error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	dir := filepath.Join(home, ".aws-oidc-session")
+	dir := sessionDir()
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
